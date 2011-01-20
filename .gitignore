@@ -1,0 +1,8 @@
+.project
+.includepath
+.build
+SQL-SplitStatement-*
+*~
+*.tmp
+*.bak
+*.stackdump
