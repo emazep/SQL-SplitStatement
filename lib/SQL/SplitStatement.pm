@@ -1,11 +1,11 @@
+## no critic
 package SQL::SplitStatement;
+## use critic
 
 use strict;
 use warnings;
 
 use base 'Class::Accessor::Fast';
-
-our $VERSION = '0.10000';
 
 use Carp qw(croak);
 use SQL::Tokenizer 0.20 qw(tokenize_sql);
@@ -49,6 +49,8 @@ my $GRANT_REVOKE_re            = qr/^(?:GRANT|REVOKE)$/i;;
 my $CREATE_ALTER_re            = qr/^(?:CREATE|ALTER)$/i;
 my $OR_REPLACE_re              = qr/^(?:OR|REPLACE)$/i;
 my $OR_REPLACE_PACKAGE_BODY_re = qr/^(?:OR|REPLACE|PACKAGE|BODY)$/i;
+
+my $pre_identifier_re = qr/TABLE|[.,(]/i;
 
 SQL::SplitStatement->mk_accessors( qw/
     keep_terminator
@@ -116,7 +118,7 @@ sub split_with_placeholders {
         $self->_current_statement( $self->_current_statement . $token );
         
         # The token is gathered even if it was a space-only token,
-        # but in this case we can skip any further analysys.
+        # but in this case we can skip any further analysis.
         next if $token =~ /^\s+$/;
         
         if ( $token =~ $DELIMITER_re && ! $prev_token ) {
@@ -129,7 +131,7 @@ sub split_with_placeholders {
             $self->_custom_delimiter(undef)
                 if $self->_custom_delimiter eq SEMICOLON
         }
-        elsif ( $self->_is_BEGIN_of_block($token) ) {
+        elsif ( $self->_is_BEGIN_of_block($token, $prev_token) ) {
             $inside_block++;
             $inside_declare = 0
         }
@@ -148,7 +150,9 @@ sub split_with_placeholders {
         elsif ( $token =~ /$DECLARE_re|$PROCEDURE_FUNCTION_re/ ) {
             # In MySQL a declare can only appear inside a BEGIN ... END block.
             $inside_declare = 1
-                unless $prev_token =~ $DROP_re || $inside_block
+                if !$inside_block
+                && $prev_token !~ $DROP_re
+                && $prev_token !~ $pre_identifier_re
         }
         elsif ( $token =~ /$GRANT_REVOKE_re/ ) {
             $inside_grant_revoke = 1 unless $prev_token
@@ -189,8 +193,8 @@ sub split_with_placeholders {
                 || $inside_package || $inside_dollar
             ) && ! $inside_grant_revoke
         ) {
-            $prev_token
-                = $token if $token =~ /\S/ && ! $self->_is_comment($token);
+            $prev_token = $token
+                if $token =~ /\S/ && ! $self->_is_comment($token);
             next
         }
         
@@ -275,9 +279,10 @@ sub _is_comment {
 }
 
 sub _is_BEGIN_of_block {
-    my ($self, $token) = @_;
+    my ($self, $token, $prev_token) = @_;
     return 
         $token =~ $BEGIN_re
+        && $prev_token !~ $pre_identifier_re
         && $self->_peek_at_next_significant_token !~ $transaction_re
 }
 
@@ -368,7 +373,7 @@ sub _is_terminator {
     
     # This is the first test to perform!
     if ( $self->_custom_delimiter ) {
-        # If a custom delimiter is currentlydefined,
+        # If a custom delimiter is currently defined,
         # no other token can terminate a statement.
         return CUSTOM_DELIMITER if $self->_is_custom_delimiter($token);
         return
@@ -379,7 +384,7 @@ sub _is_terminator {
     if ( $token eq FORWARD_SLASH ) {
         return SLASH_TERMINATOR if $prev_token eq SEMICOLON;
         return SEMICOLON_TERMINATOR
-    };
+    }
     
     # $token eq SEMICOLON
     my $next_token = $self->_peek_at_next_significant_token;
@@ -410,10 +415,6 @@ __END__
 =head1 NAME
 
 SQL::SplitStatement - Split any SQL code into atomic statements
-
-=head1 VERSION
-
-Version 0.10000
 
 =head1 SYNOPSIS
 
@@ -452,20 +453,21 @@ SQL
 =head1 DESCRIPTION
 
 This is a simple module which tries to split any SQL code, even including
-non-standard extensions (for the details, see the L</SUPPORTED DBMSs> section
+non-standard extensions (for the details see the L</SUPPORTED DBMSs> section
 below), into the atomic statements it is composed of.
 
 The logic used to split the SQL code is more sophisticated than a raw C<split>
-on the I<statement terminator token>, so that SQL::SplitStatement is able to
-correctly handle the presence of said token inside identifiers, values,
-comments, C<BEGIN ...  END> blocks (even nested), I<dollar-quoted> strings,
-MySQL custom C<DELIMITER>s etc., as (partially) exemplified in the synopsis
-above. Furthermore, it is able to handle procedural code.
+on the C<;> (semicolon) character: first, various different statement terminator
+I<tokens> are recognized (see below for the list), then this module is able to
+correctly handle the presence of said tokens inside identifiers, values,
+comments, C<BEGIN ... END> blocks (even nested), I<dollar-quoted> strings, MySQL
+custom C<DELIMITER>s, procedural code etc., as (partially) exemplified in the
+synopsis above.
 
 Consider however that this is by no means a validating parser (technically
 speaking, it's just a I<context-sensitive tokenizer>). It should rather be seen
 as an in-progress I<heuristic> approach, which will gradually improve as bugs
-will be reported. This also mean that, with the exception of the
+will be reported. This also means that, with the exception of the
 L</LIMITATIONS> detailed below, there are no known (to the author) SQL
 constructs the most current release of this module can't handle.
 
@@ -504,7 +506,7 @@ If your statements are to be fed to a DBMS, you are advised to keep this option
 to its default (false) value, since some drivers/DBMSs don't want the terminator
 to be present at the end of the (single) statement.
 
-The strings currently recognized (depending on the I<context>) as terminators
+The strings currently recognized as terminators (depending on the I<context>)
 are:
 
 =over 4
@@ -552,7 +554,7 @@ Both SQL and multi-line C-style comments are recognized.
 When kept, each comment is returned in the same string with the atomic statement
 it belongs to. A comment belongs to a statement if it appears, in the original
 SQL code, before the end of that statement and after the terminator of the
-previous statement (if it exists), as shown in this meta-SQL snippet:
+previous statement (if it exists), as shown in this pseudo-SQL snippet:
 
     /* This comment
     will be returned
@@ -649,7 +651,7 @@ I<unnamed placeholders> contained in the corresponding atomic statement.
 
 More precisely, its return value is a list of two elements, the first of which
 is a reference to the list of the atomic statements exactly as returned by the
-C<split> method, while the second is a reference to the list of the numbers of
+C<split> method, while the second is a reference to the list of the number of
 placeholders as explained above.
 
 Currently the only recognized placeholders are the C<?> (question mark)
@@ -739,28 +741,19 @@ Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
 =head1 LIMITATIONS
 
 To be split correctly, the given SQL code is subject to the following
-limitations.
+limitations, mainly concerning procedural code (the limitation about the use
+of some keywords as unquoted identifiers affecting the previous releases, has
+now been eliminated).
 
 =over 4
 
-=item * Identifiers
-
-The keywords C<BEGIN>, C<DECLARE>, C<FUNCTION> and C<PROCEDURE>
-(case-insensitive) cannot be used as (I<bare>) object identifiers
-(e.g. table names, field names etc.)
-
-They can however be used, as long as they are quoted, as shown here:
-
-    CREATE TABLE  declare  (  begin  VARCHAR ); -- Wrong, though accepted by some DBMSs.
-    CREATE TABLE "declare" ( "begin" VARCHAR ); -- Correct!
-
 =item * Procedural extensions
 
-Currently any block of code which start with C<DECLARE>, C<CREATE> or I<CALL>
+Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL>
 is correctly recognized, as well as I<bare> C<BEGIN ... END> blocks and
 I<dollar quoted> blocks, therefore a wide range of procedural extensions should
-be handled correctly. However, only PL/SQL and PL/PgSQL code has been tested
-so far.
+be handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been
+tested so far.
 
 If you need also other procedural languages to be recognized, please let me know
 (possibly with some test cases).
@@ -833,6 +826,8 @@ SQL::SplitStatement depends on the following modules:
 Emanuele Zeppieri, C<< <emazep@cpan.org> >>
 
 =head1 BUGS
+
+No known bugs.
 
 Please report any bugs or feature requests to
 C<bug-sql-SplitStatement at rt.cpan.org>, or through the web interface at

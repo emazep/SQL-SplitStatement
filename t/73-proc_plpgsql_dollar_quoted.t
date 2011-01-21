@@ -61,6 +61,10 @@ $$ LANGUAGE plpgsql;
 
 DROP FUNCTION somefunc(integer);
 
+CREATE FUNCTION funcname (argument-types) RETURNS return-type AS $$
+    # PL/Perl function body
+$$ LANGUAGE plperl;
+
 SQL
 
 my $splitter;
@@ -71,7 +75,7 @@ $splitter = SQL::SplitStatement->new;
 @statements = $splitter->split( $sql_code );
 
 cmp_ok(
-    @statements, '==', 7,
+    @statements, '==', 8,
     'Statements correctly split'
 );
 
