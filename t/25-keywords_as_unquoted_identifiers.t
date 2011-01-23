@@ -63,7 +63,7 @@ ENDCREATE TABLE declare (
 SQL
 
 my $sql_splitter = SQL::SplitStatement->new({
-    keep_terminator       => 1,
+    keep_terminators      => 1,
     keep_extra_spaces     => 1,
     keep_empty_statements => 1,
     keep_comments         => 1

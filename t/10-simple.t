@@ -49,7 +49,7 @@ is (
     'SQL code rebuilt w/ semicolon'
 );
 
-$sql_splitter->keep_terminator(0);
+$sql_splitter->keep_terminators(0);
 @statements = $sql_splitter->split($sql);
 
 is (

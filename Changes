@@ -2,6 +2,15 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+* Fixed a PL/SQL problem where a FUNCTION or PROCEDURE inside a PACKAGE, could
+  cause the parser to trip over the end of the package.
+
+* Tests for this.
+
+* keep_terminator as a keep_terminators alias fix.
+
+* Minor doc fixes.
+
 0.20000       2011-01-21 18:53:11 Europe/Rome
 
 * Removed the limitation on the BEGIN, DECLARE, FUNCTION and PROCEDURE

@@ -204,12 +204,12 @@ The string which will be printed between the groups of statements coming from
 different files. By default it is the C<<<< -- >>>*<<< -- >>>> string on its own
 line.
 
-Similarly to the I<statement separator>, the file separator will not be printed
+Similarly to the statement separator, the file separator will not be printed
 after the last file.
 
 =head2 -e, --error, --on-error I<value>
 
-It controls the program behavior in case one of the given files is not
+It controls the program behaviour in case one of the given files is not
 accessible.
 
 It can take the following values:
@@ -261,22 +261,22 @@ limitations, mainly concerning procedural code.
 
 =item * Procedural extensions
 
-Currently any block of code which start with C<DECLARE>, C<CREATE> or I<CALL> is
-correctly recognized, as well as I<Bare> C<BEGIN ... END> blocks and I<dollar
+Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL> is
+correctly recognized, as well as I<bare> C<BEGIN ... END> blocks and I<dollar
 quoted> blocks, therefore a wide range of procedural extensions should be
 handled correctly. However, only PL/SQL and PL/PgSQL code has been tested so
 far.
 
 =item * PL/SQL
 
-If a I<package> contains also an I<initialization block>, then it must have the
-package name after the C<END> or it must terminate with a semicolon and a slash
-(which is the recommended practice anyway).
+If a I<package> contains also an I<initialization block>, then it must terminate
+with a semicolon and a slash, or it must have the package name after the C<END>
+of package (which is the recommended practice anyway).
 
 For example, these two package (pseudo-)definitions will be correctly split:
 
     -- OK since it has the trailing slash
-    CREATE OR REPLACE PACKAGE BODY my_package_1 AS
+    CREATE OR REPLACE PACKAGE BODY my_package AS
         ...
     BEGIN
         ...
@@ -284,23 +284,23 @@ For example, these two package (pseudo-)definitions will be correctly split:
     /
     
     -- OK since it has the package name after the END
-    CREATE OR REPLACE PACKAGE BODY my_package_2 AS
+    CREATE OR REPLACE PACKAGE BODY my_package AS
         ...
     BEGIN
         ...
-    END my_package_2;
+    END my_package;
 
 while this one wouldn't, since it contains an initialization block and it lacks
 both the package name after the C<END> and the trailing slash:
 
     CREATE OR REPLACE PACKAGE BODY my_package AS
         ...
-    BEGIN
+    BEGIN -- initialization block starts here
         ...
     END;
 
 Note however that if the initialization block is absent, the package block will
-be correctly recognized even if it lacks both the package name after the C<END>
+be correctly isolated even if it lacks both the package name after the C<END>
 and the trailing slash.
 
 =back
@@ -324,7 +324,7 @@ anyway (remember that this is NOT a validating parser!)
 
 =head1 COPYRIGHT
 
-Copyright 2010-2011 I<Emanuele Zeppieri> E<lt>emazep@cpan.orgE<gt>.
+Copyright 2011 I<Emanuele Zeppieri> E<lt>emazep@cpan.orgE<gt>.
 
 =head1 LICENSE
 
