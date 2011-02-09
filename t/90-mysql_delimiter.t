@@ -31,6 +31,9 @@ FOR EACH ROW my_block: BEGIN
         WHERE uar.user_id = NEW.user_id;
     END IF;
 END my_block;
+/
+-- Illegal, just to check that a / inside a custom delimiter
+-- can't split the statement.
 set localvariable datatype;
 set localvariable = parameter2;
 select fields from table where field1 = parameter1;

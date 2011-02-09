@@ -9,14 +9,19 @@ use base 'Class::Accessor::Fast';
 
 use Carp qw(croak);
 use SQL::Tokenizer 0.20 qw(tokenize_sql);
-use List::MoreUtils qw(firstval each_array);
+use List::MoreUtils qw(firstval firstidx each_array);
 use Regexp::Common qw(delimited);
 
 use constant {
-    SEMICOLON     => ';',
-    FORWARD_SLASH => '/',
-    PLACEHOLDER   => '?',
-    DOLLAR_QUOTE  => '$$',
+    NEWLINE        => "\n",
+    SEMICOLON      => ';',
+    DOT            => '.',
+    FORWARD_SLASH  => '/',
+    QUESTION_MARK  => '?',
+    SINGLE_DOLLAR  => '$',
+    DOUBLE_DOLLAR  => '$$',
+    OPEN_BRACKET   => '(',
+    CLOSED_BRACKET => ')',
     
     SEMICOLON_TERMINATOR => 1,
     SLASH_TERMINATOR     => 2,
@@ -32,31 +37,56 @@ my $transaction_re = qr[^(?:
     |ISOLATION
     |READ
 )$]xi;
-my $procedural_END_re     = qr/^(?:IF|LOOP)$/i;
-my $terminator_re         = qr[;|/|;\s+/];
+my $procedural_END_re     = qr/^(?:IF|CASE|LOOP)$/i;
+my $terminator_re = qr[
+    ;\s*\n\s*\.\s*\n\s*/\s*\n?
+    |;\s*\n\s*/\s*\n?
+    |\.\s*\n\s*/\s*\n?
+    |\n\s*/\s*\n?
+    |;
+]x;
 my $begin_comment_re      = qr/^(?:--|\/\*)/;
-my $quoted_re             = $RE{delimited}{-delim=>q{'"}};
+my $quoted_re             = $RE{delimited}{ -delim=>q{"'`} };
+my $CURSOR_re             = qr/^CURSOR$/i;
 my $DELIMITER_re          = qr/^DELIMITER$/i;
 my $DECLARE_re            = qr/^DECLARE$/i;
-my $PROCEDURE_FUNCTION_re = qr/^(?:PROCEDURE|FUNCTION)$/i;
+my $PROCEDURE_FUNCTION_re = qr/^(?:FUNCTION|PROCEDURE)$/i;
 my $PACKAGE_re            = qr/^PACKAGE$/i;
 my $BEGIN_re              = qr/^BEGIN$/i;
 my $END_re                = qr/^END$/i;
 my $AS_re                 = qr/^AS$/i;
+my $IS_re                 = qr/^IS$/i;
+my $TYPE_re               = qr/^TYPE$/i;
+my $BODY_re               = qr/^BODY$/i;
 my $DROP_re               = qr/^DROP$/i;
+my $CRUD_re               = qr/^(?:DELETE|INSERT|SELECT|UPDATE)$/i;
 
 my $GRANT_REVOKE_re            = qr/^(?:GRANT|REVOKE)$/i;;
 my $CREATE_ALTER_re            = qr/^(?:CREATE|ALTER)$/i;
+my $CREATE_REPLACE_re          = qr/^(?:CREATE|REPLACE)$/i;
 my $OR_REPLACE_re              = qr/^(?:OR|REPLACE)$/i;
-my $OR_REPLACE_PACKAGE_BODY_re = qr/^(?:OR|REPLACE|PACKAGE|BODY)$/i;
+my $OR_REPLACE_PACKAGE_re = qr/^(?:OR|REPLACE|PACKAGE)$/i;
 
-my $pre_identifier_re = qr/TABLE|[.,(]/i;
+my $pre_identifier_re = qr/^(?:
+    BODY
+    |CONSTRAINT
+    |CURSOR
+    |DECLARE
+    |FUNCTION
+    |INDEX
+    |PACKAGE
+    |PROCEDURE
+    |REFERENCES
+    |TABLE
+    |[.,(]
+)$/xi;
 
 SQL::SplitStatement->mk_accessors( qw/
     keep_terminators
     keep_extra_spaces
     keep_empty_statements
     keep_comments
+    slash_terminates
     _tokens
     _current_statement
     _custom_delimiter
@@ -77,6 +107,8 @@ sub new {
     elsif ( exists $parameters->{keep_terminator} ) {
         $parameters->{keep_terminators} = delete $parameters->{keep_terminator}
     }
+    $parameters->{slash_terminates} = 1
+        unless exists $parameters->{slash_terminates};
     $class->SUPER::new( $parameters )
 }
 
@@ -92,18 +124,35 @@ sub split_with_placeholders {
     my @placeholders = ();
     my @statements   = ();
     my $statement_placeholders = 0;
-    my $package_name = '';
-    my $prev_token   = '';
     
     my $inside_block        = 0;
+    my $inside_brackets     = 0;
+    my $inside_sub          = 0;
+    my $inside_is_as        = 0;
+    my $inside_cursor       = 0;
+    my $inside_is_cursor    = 0;
     my $inside_declare      = 0;
     my $inside_package      = 0;
-    my $inside_dollar       = 0;
     my $inside_grant_revoke = 0;
+    my $inside_crud         = 0;
+    my $extra_end_found     = 0;
+    
+    my @sub_names    = ();
+    my $package_name = '';
+    
+    my $dollar_quote;
+    my $dollar_quote_to_add;
+    
+    my $prev_token   = '';
+    my $prev_keyword = '';
     
     my $custom_delimiter_def_found = 0;
     
-    $code = "\n" if ! defined $code;
+    if ( !defined $code ) {
+        $code = "\n"
+    } else {
+        $code .= "\n"
+    };
     $self->_tokens( [ tokenize_sql($code) ] );
     $self->_terminators( [] ); # Needed (only) to remove them afterwards
                                # when keep_terminators is false.
@@ -117,28 +166,53 @@ sub split_with_placeholders {
         next if $self->_is_comment($token) && ! $self->keep_comments;
         
         # Append the token to the current statement;
-        $self->_current_statement( $self->_current_statement . $token );
+        $self->_add_to_current_statement($token);
         
         # The token is gathered even if it was a space-only token,
         # but in this case we can skip any further analysis.
         next if $token =~ /^\s+$/;
         
-        if ( $token =~ $DELIMITER_re && ! $prev_token ) {
-            my $tokens_to_shift = $self->_shift_and_set_custom_delimiter;
-            $self->_current_statement(
-                $self->_current_statement
-                . join '', splice @{ $self->_tokens }, 0, $tokens_to_shift
+        if ( $dollar_quote ) {
+            if ( $self->_dollar_quote_close_found($token, $dollar_quote) ) {
+                $self->_add_to_current_statement($dollar_quote_to_add);
+                undef $dollar_quote;
+                # Saving $prev_token not necessary in this case.
+                
+                $inside_sub = 0; # Silence sub opening before dollar quote.
+                @sub_names = ();
+                $inside_is_as = 0; # Silence is_as opening before dollar quote.
+                $inside_declare = 0;
+                
+                next
+            }
+        }
+        
+        if ( 
+            $prev_token =~ $AS_re
+            and !$dollar_quote
+            and $dollar_quote = $self->_dollar_quote_open_found($token)
+        ) {
+            ( $dollar_quote_to_add = $dollar_quote ) =~ s[^\$+][];
+            $self->_add_to_current_statement($dollar_quote_to_add)
+        }
+        elsif ( $token =~ $DELIMITER_re && !$prev_token ) {
+            my $tokens_to_shift = $self->_custom_delimiter_def_found;
+            $self->_add_to_current_statement(
+                join '', splice @{ $self->_tokens }, 0, $tokens_to_shift
             );
             $custom_delimiter_def_found = 1;
             $self->_custom_delimiter(undef)
                 if $self->_custom_delimiter eq SEMICOLON
         }
-        elsif ( $self->_is_BEGIN_of_block($token, $prev_token) ) {
-            $inside_block++;
-            $inside_declare = 0
+        elsif ( $token eq OPEN_BRACKET ) {
+            $inside_brackets++
         }
-        elsif ( $token eq DOLLAR_QUOTE ) {
-            $inside_dollar = $prev_token =~ $AS_re ? 1 : 0
+        elsif ( $token eq CLOSED_BRACKET ) {
+            $inside_brackets--
+        }
+        elsif ( $self->_is_BEGIN_of_block($token, $prev_token) ) {
+            $extra_end_found = 0 if $extra_end_found;
+            $inside_block++
         }
         elsif ( $token =~ $CREATE_ALTER_re ) {
             my $next_token = $self->_peek_at_next_significant_token(
@@ -149,11 +223,41 @@ sub split_with_placeholders {
                 $package_name = $self->_peek_at_package_name
             }
         }
-        elsif ( $token =~ /$DECLARE_re|$PROCEDURE_FUNCTION_re/ ) {
+        elsif (
+            $token =~ $PROCEDURE_FUNCTION_re
+            || $token =~ $BODY_re && $prev_token =~ $TYPE_re
+        ) {
+            if (
+                !$inside_block && !$inside_brackets
+                && $prev_token !~ $DROP_re
+                && $prev_token !~ $pre_identifier_re
+            ) {
+                $inside_sub++;
+                $prev_keyword = $token;
+                push @sub_names, $self->_peek_at_next_significant_token
+            }
+        }
+        elsif ( $token =~ $IS_re || $token =~ $AS_re ) {
+            if (
+                $prev_keyword =~ /$PROCEDURE_FUNCTION_re|$BODY_re/
+                && !$inside_block && $prev_token !~ $pre_identifier_re
+            ) {
+                $inside_is_as++;
+                $prev_keyword = ''
+            }
+            
+            $inside_is_cursor = 1
+                if $inside_declare && $inside_cursor
+        }
+        elsif ( $token =~ $DECLARE_re ) {
             # In MySQL a declare can only appear inside a BEGIN ... END block.
             $inside_declare = 1
                 if !$inside_block
-                && !$inside_package
+                && $prev_token !~ $pre_identifier_re
+        }
+        elsif ( $token =~ $CURSOR_re ) {
+            $inside_cursor = 1
+                if $inside_declare
                 && $prev_token !~ $DROP_re
                 && $prev_token !~ $pre_identifier_re
         }
@@ -163,42 +267,102 @@ sub split_with_placeholders {
         elsif (
             defined ( my $name = $self->_is_END_of_block($token) )
         ) {
-            # The END of a PACKAGE block may or may not be followed
-            # by the package name: we have to detect both these cases.
-            if (
-                $inside_package && ( $name eq $package_name || ! $inside_block )
-            ) {
-                $inside_package = 0;
-                $package_name = ''
+            $extra_end_found = 1 if !$inside_block;
+            
+            $inside_block-- if $inside_block;
+            
+            if ( !$inside_block ) {
+                # $name contains the next (significant) token.
+                if ( $name eq SEMICOLON ) {
+                    # Keep this order!
+                    if ( $inside_sub && $inside_is_as ) {
+                        $inside_sub--;
+                        $inside_is_as--;
+                        pop @sub_names if $inside_sub < @sub_names
+                    } elsif ( $inside_declare ) {
+                        $inside_declare = 0
+                    } elsif ( $inside_package ) {
+                        $inside_package = 0;
+                        $package_name = ''
+                    }
+                }
+                
+                if ( $inside_sub && @sub_names && $name eq $sub_names[-1] ) {
+                    $inside_sub--;
+                    pop @sub_names if $inside_sub < @sub_names
+                }
+                
+                if ( $inside_package && $name eq $package_name ) {
+                    $inside_package = 0;
+                    $package_name = ''
+                }
             }
-            # This goes *AFTER* the above _is_END_of_block check!
-            $inside_block-- if $inside_block
+        }
+        elsif ( $token =~ $CRUD_re ) {
+            $inside_crud = 1
         }
         elsif (
-            $token eq PLACEHOLDER
-            && ( ! $self->_custom_delimiter
-                || $self->_custom_delimiter ne PLACEHOLDER
+            $inside_crud && (
+                my $placeholder_token
+                    = $self->_questionmark_placeholder_found($token)
+                    || $self->_named_placeholder_found($token)
+                    || $self->_dollar_placeholder_found($token)
             )
         ) {
             $statement_placeholders++
+                if ! $self->_custom_delimiter
+                    || $self->_custom_delimiter ne $placeholder_token;
+            
+            # The only multi-token placeholder is a dollar placeholder.
+            if ( ( my $token_to_add = $placeholder_token ) =~ s[^\$][] ) {
+                $self->_add_to_current_statement($token_to_add)
+            }
         }
         else {
-            $terminator_found = $self->_is_terminator($token, $prev_token)
+            $terminator_found = $self->_is_terminator($token);
+            
+            if (
+                $terminator_found && $terminator_found == SEMICOLON_TERMINATOR
+                && !$inside_brackets
+            ) {
+                if ( $inside_sub && !$inside_is_as && !$inside_block ) {
+                    # Needed to close PL/SQL sub forward declarations such as:
+                    # PROCEDURE proc(number1 NUMBER);
+                    $inside_sub--
+                }
+                
+                if ( $inside_declare && $inside_cursor && !$inside_is_cursor ) {
+                    # Needed to close CURSOR decl. other than those in PL/SQL
+                    # inside a DECLARE;
+                    $inside_declare = 0
+                }
+                
+                $inside_crud = 0 if $inside_crud
+            }
         }
         
-        if (
-            ! $terminator_found && ! $custom_delimiter_def_found
-                ||
-            $terminator_found
-            && $terminator_found == SEMICOLON_TERMINATOR
-            && (
-                $inside_block || $inside_declare
-                || $inside_package || $inside_dollar
-            ) && ! $inside_grant_revoke
+        $prev_token = $token
+            if $token =~ /\S/ && ! $self->_is_comment($token);
+        
+        # If we've just found a new custom DELIMITER definition, we certainly
+        # have a new statement (and no terminator).
+        unless (
+            $custom_delimiter_def_found
+            || $terminator_found && $terminator_found == CUSTOM_DELIMITER
         ) {
-            $prev_token = $token
-                if $token =~ /\S/ && ! $self->_is_comment($token);
-            next
+            # Let's examine any condition that can make us remain in the
+            # current statement.
+            next if
+                !$terminator_found || $dollar_quote || $inside_brackets
+                || $self->_custom_delimiter;
+            
+            next if
+                $terminator_found
+                && $terminator_found == SEMICOLON_TERMINATOR
+                && (
+                    $inside_block || $inside_sub
+                    || $inside_declare || $inside_package || $inside_crud
+                ) && !$inside_grant_revoke && !$extra_end_found
         }
         
         # Whenever we get this far, we have a new statement.
@@ -209,7 +373,7 @@ sub split_with_placeholders {
         # If $terminator_found == CUSTOM_DELIMITER
         # @{ $self->_terminators } element has already been pushed,
         # so we have to set it only in the case tested below.
-        push @{ $self->_terminators }, [$terminator_found, undef]
+        push @{ $self->_terminators }, [ $terminator_found, undef ]
             if (
                 $terminator_found == SEMICOLON_TERMINATOR
                 || $terminator_found == SLASH_TERMINATOR
@@ -218,18 +382,28 @@ sub split_with_placeholders {
         $self->_current_statement('');
         $statement_placeholders = 0;
         
-        $prev_token          = '';
+        $prev_token   = '';
+        $prev_keyword = '';
+        
+        $inside_brackets     = 0;
         $inside_block        = 0;
+        $inside_cursor       = 0;
+        $inside_is_cursor    = 0;
+        $inside_sub          = 0;
+        $inside_is_as        = 0;
         $inside_declare      = 0;
         $inside_package      = 0;
-        $inside_dollar       = 0;
         $inside_grant_revoke = 0;
+        $inside_crud         = 0;
+        $extra_end_found     = 0;
+        @sub_names           = ();
         
         $custom_delimiter_def_found = 0
     }
     
     # Last statement.
-    push @statements, $self->_current_statement;
+    chomp( my $last_statement = $self->_current_statement );
+    push @statements, $last_statement;
     push @{ $self->_terminators }, [undef, undef];
     push @placeholders, $statement_placeholders;
     
@@ -249,7 +423,7 @@ sub split_with_placeholders {
             my $only_terminator_re
                 = $terminator->[0] && $terminator->[0] == CUSTOM_DELIMITER
                 ? qr/^\s*$terminator->[1]?\s*$/
-                : qr/^\s*$terminator_re?\s*$/;
+                : qr/^\s*$terminator_re?\z/;
             unless ( $statement =~ $only_terminator_re ) {
                 push @filtered_statements, $statement;
                 push @filtered_terminators, $terminator;
@@ -261,10 +435,12 @@ sub split_with_placeholders {
     unless ( $self->keep_terminators ) {
         for ( my $i = 0; $i < @filtered_statements; $i++ ) {
             my $terminator = $filtered_terminators[$i];
-            if ( $terminator->[0] && $terminator->[0] == CUSTOM_DELIMITER ) {
-                $filtered_statements[$i] =~ s/$terminator->[1]$//
-            } elsif ( $terminator->[0] ) {
-                $filtered_statements[$i] =~ s/$terminator_re$//
+            if ( $terminator->[0] ) {
+                if ( $terminator->[0] == CUSTOM_DELIMITER ) {
+                    $filtered_statements[$i] =~ s/\Q$terminator->[1]\E$//
+                } else {
+                    $filtered_statements[$i] =~ s/$terminator_re$//
+                }
             }
         }
     }
@@ -274,6 +450,11 @@ sub split_with_placeholders {
     }
     
     return ( \@filtered_statements, \@filtered_placeholders )
+}
+
+sub _add_to_current_statement {
+    my ($self, $token) = @_;
+    $self->_current_statement( $self->_current_statement() . $token )
 }
 
 sub _is_comment {
@@ -296,7 +477,7 @@ sub _is_END_of_block {
     # Return possible package name.
     if (
         $token =~ $END_re && (
-            ! defined($next_token)
+            !defined($next_token)
             || $next_token !~ $procedural_END_re
         )
     ) { return defined $next_token ? $next_token : '' }
@@ -304,11 +485,86 @@ sub _is_END_of_block {
     return
 }
 
-sub _peek_at_package_name {
-    shift->_peek_at_next_significant_token($OR_REPLACE_PACKAGE_BODY_re)
+sub _dollar_placeholder_found {
+    my ($self, $token) = @_;
+    
+    return '' if $token ne SINGLE_DOLLAR;
+    
+    # $token must be: '$'
+    my $tokens = $self->_tokens;
+    
+    return $tokens->[0] =~ /^\d+$/ && $tokens->[1] !~ /^\$/
+        ? $token . shift( @$tokens )
+        : ''
 }
 
-sub _shift_and_set_custom_delimiter {
+sub _named_placeholder_found {
+    my ($self, $token) = @_;
+    
+    return $token =~ /^:(?:\d+|[_a-z][_a-z\d]*)$/ ? $token : ''
+}
+
+sub _questionmark_placeholder_found {
+    my ($self, $token) = @_;
+    
+    return $token eq QUESTION_MARK ? $token : ''
+}
+
+sub _dollar_quote_open_found {
+    my ($self, $token) = @_;
+    
+    return '' if $token !~ /^\$/;
+    return $token if $token eq DOUBLE_DOLLAR;
+    
+    # $token must be: '$'
+    my $tokens = $self->_tokens;
+    
+    # False alarm!
+    return '' if $tokens->[1] !~ /^\$/;
+    
+    return $token . shift( @$tokens ) . shift( @$tokens )
+        if $tokens->[1] eq SINGLE_DOLLAR;
+    
+    # $tokens->[1] must be: '$$'
+    my $quote = $token . shift( @$tokens ) . '$';
+    $tokens->[0] = '$';
+    return $quote
+}
+
+sub _dollar_quote_close_found {
+    my ($self, $token, $dollar_quote) = @_;
+    
+    return if $token !~ /^\$/;
+    return 1 if $token eq $dollar_quote; # $token eq '$$'
+    
+    # $token must be: '$'
+    my $tokens = $self->_tokens;
+    
+    # False alarm!
+    return if $tokens->[1] !~ /^\$/;
+    
+    if ( $dollar_quote eq $token . $tokens->[0] . $tokens->[1] ) {
+        shift( @$tokens ); shift( @$tokens );
+        return 1
+    }
+    
+    # $tokens->[1] must be: '$$'
+    if ( $dollar_quote eq $token . $tokens->[0] . '$' ) {
+        shift( @$tokens );
+        $tokens->[0] = '$';
+        return 1
+    }
+    
+    return
+}
+
+sub _peek_at_package_name {
+    shift->_peek_at_next_significant_token(
+        qr/$OR_REPLACE_PACKAGE_re|$BODY_re/
+    )
+}
+
+sub _custom_delimiter_def_found {
     my $self = shift;
     
     my $tokens = $self->_tokens;
@@ -331,9 +587,9 @@ sub _shift_and_set_custom_delimiter {
     } else {
         # Gather an unquoted custom delimiter, which could be composed
         # by several tokens (that's the SQL::Tokenizer behaviour).
-        foreach ( @{$tokens}[ $base_index .. $#{ $tokens } ] ) {
-            last if /^\s$/;
-            $delimiter .= $_;
+        foreach ( $base_index .. $#{ $tokens } ) {
+            last if $tokens->[$_] =~ /^\s+$/;
+            $delimiter .= $tokens->[$_];
             $tokens_in_delimiter++
         }
         $tokens_to_shift = $base_index + $tokens_in_delimiter
@@ -359,9 +615,7 @@ sub _is_custom_delimiter {
         = splice @{$tokens}, 0, $self->_tokens_in_custom_delimiter() - 1;
     my $lookahead_delimiter = join '', @delimiter_tokens;
     if ( $self->_custom_delimiter eq $token . $lookahead_delimiter ) {
-        $self->_current_statement(
-            $self->_current_statement . $lookahead_delimiter
-        );
+        $self->_add_to_current_statement($lookahead_delimiter);
         push @{ $self->_terminators },
             [ CUSTOM_DELIMITER, $self->_custom_delimiter ];
         return 1
@@ -372,29 +626,74 @@ sub _is_custom_delimiter {
 }
 
 sub _is_terminator {
-    my ($self, $token, $prev_token) = @_;
+    my ($self, $token) = @_;
     
     # This is the first test to perform!
     if ( $self->_custom_delimiter ) {
         # If a custom delimiter is currently defined,
         # no other token can terminate a statement.
         return CUSTOM_DELIMITER if $self->_is_custom_delimiter($token);
+        
         return
     }
     
     return if $token ne FORWARD_SLASH && $token ne SEMICOLON;
     
+    my $tokens = $self->_tokens;
+            
     if ( $token eq FORWARD_SLASH ) {
-        return SLASH_TERMINATOR if $prev_token eq SEMICOLON;
-        return SEMICOLON_TERMINATOR
+        # Remove the trailing FORWARD_SLASH from the current statement
+        chop( my $current_statement = $self->_current_statement );
+        
+        my $next_token      = $tokens->[0];
+        my $next_next_token = $tokens->[1];
+        
+        if (
+            !defined($next_token)
+            || $next_token eq NEWLINE
+            || $next_token =~ /^\s+$/ && $next_next_token eq NEWLINE
+        ) {
+            return SLASH_TERMINATOR
+                if $current_statement =~ /;\s*\n\s*\z/
+                    || $current_statement =~ /\n\s*\.\s*\n\s*\z/;
+            
+            # Slash with no preceding semicolon or period:
+            # this is to be treated as a semicolon terminator...
+            my $next_significant_token_idx
+                = $self->_next_significant_token_idx;
+            # ... provided that it's not a division operator
+            # (at least not a blatant one ;-)
+            return SEMICOLON_TERMINATOR
+                if $self->slash_terminates
+                && $current_statement =~ /\n\s*\z/
+                && (
+                    $next_significant_token_idx == -1
+                        ||
+                    $tokens->[$next_significant_token_idx] ne OPEN_BRACKET
+                    && $tokens->[$next_significant_token_idx] !~ /^\d/
+                    && !(
+                        $tokens->[$next_significant_token_idx] eq DOT
+                        && $tokens->[$next_significant_token_idx + 1] =~ /^\d/
+                    )
+                )
+        }
+        
+        return
     }
     
     # $token eq SEMICOLON.
-    my $next_token = $self->_peek_at_next_significant_token;
-    return SEMICOLON_TERMINATOR
-        if ! defined($next_token) || $next_token ne FORWARD_SLASH;
     
-    # $next_token eq FORWARD_SLASH: let's wait for it to terminate.
+    my $next_code_portion = '';
+    my $i = 0;
+    $next_code_portion .= $tokens->[$i++]
+        while $i <= 8 && defined $tokens->[$i];
+    
+    return SEMICOLON_TERMINATOR
+        if $token eq SEMICOLON
+            && $next_code_portion !~ m#\A\s*\n\s*/\s*$#m
+            && $next_code_portion !~ m#\A\s*\n\s*\.\s*\n\s*/\s*$#m;
+    
+    # there is a FORWARD_SLASH next: let's wait for it to terminate.
     return
 }
 
@@ -402,11 +701,27 @@ sub _peek_at_next_significant_token {
     my ($self, $skiptoken_re) = @_;
     
     my $tokens = $self->_tokens;
-    return $skiptoken_re
+    my $next_significant_token = $skiptoken_re
         ? firstval {
             /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_re/
         } @{ $tokens }
         : firstval {
+            /\S/ && ! $self->_is_comment($_)
+        } @{ $tokens };
+    
+    return $next_significant_token if defined $next_significant_token;
+    return ''
+}
+
+sub _next_significant_token_idx {
+    my ($self, $skiptoken_re) = @_;
+    
+    my $tokens = $self->_tokens;
+    return $skiptoken_re
+        ? firstidx {
+            /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_re/
+        } @{ $tokens }
+        : firstidx {
             /\S/ && ! $self->_is_comment($_)
         } @{ $tokens }
 }
@@ -422,18 +737,18 @@ SQL::SplitStatement - Split any SQL code into atomic statements
 =head1 SYNOPSIS
 
     # Multiple SQL statements in a single string
-my $sql_code = <<'SQL';
+    my $sql_code = <<'SQL';
     CREATE TABLE parent(a, b, c   , d    );
     CREATE TABLE child (x, y, "w;", "z;z");
     /* C-style comment; */
     CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
         EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
     BEGIN
-        SELECT RAISE(ABORT, 'constraint failed;'); -- Inlined SQL comment
+        SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
     END;
     -- Standalone SQL; comment; with semicolons;
     INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
-SQL
+    SQL
     
     use SQL::SplitStatement;
     
@@ -469,10 +784,14 @@ L</SYNOPSIS> above.
 
 Consider however that this is by no means a validating parser (technically
 speaking, it's just a I<context-sensitive tokenizer>). It should rather be seen
-as an in-progress I<heuristic> approach, which will gradually improve as bugs
-will be reported. This also means that, with the exception of the
-L</LIMITATIONS> detailed below, there are no known (to the author) SQL
-constructs the most current release of this module can't handle.
+as an in-progress I<heuristic> approach, which will gradually improve as test
+cases will be reported. This also means that, except for the L</LIMITATIONS>
+detailed below, there is no known (to the author) SQL code the most current
+release of this module can't correctly split.
+
+The test suite bundled with the distribution (which now includes the popular
+I<Sakila> and I<Pagila> sample db schemata, as detailed in the L</SHOWCASE>
+section below) should give you an idea of the capabilities of this module
 
 If your atomic statements are to be fed to a DBMS, you are encouraged to use
 L<DBIx::MultiStatementDo> instead, which uses this module and also (optionally)
@@ -494,36 +813,55 @@ behavior you would probably want.
 It creates and returns a new SQL::SplitStatement object. It accepts its options
 either as a hash or a hashref.
 
-C<new> takes the following Boolean options, which all default to false.
+C<new> takes the following Boolean options, which for documentation purposes can
+be grouped in two sets: L</Formatting Options> and L</DBMSs Specific Options>.
+
+=head3 Formatting Options
 
 =over 4
 
 =item * C<keep_terminators>
 
 A Boolean option which causes, when set to a false value (which is the default),
-the trailing terminator tokens to be discarded in the returned atomic
-statements.
+the trailing terminator token to be discarded in the returned atomic statements.
 When set to a true value, the terminators are kept instead.
 
-If your statements are to be fed to a DBMS, you are advised to keep this option
-to its default (false) value, since some drivers/DBMSs don't want the terminator
-to be present at the end of the (single) statement.
-
-The strings currently recognized as terminators (depending on the I<context>)
+The possible terminators (which are treated as such depending on the context)
 are:
 
 =over 4
 
-=item * C<;> (the I<semicolon> character).
+=item *
 
-=item * C</> (the I<forward-slash> character).
+C<;> (the I<semicolon> character);
 
-=item * A semicolon followed by a forward-slash on its own line. This latter
-string is treated as a single token (it is used to terminate PL/SQL procedures).
+=item *
 
-=item * Any string defined by the MySQL C<DELIMITER> command.
+any string defined by the MySQL C<DELIMITER> command;
+
+=item *
+
+an C<;> followed by an C</> (I<forward-slash> character) on its own line;
+
+=item *
+
+an C<;> followed by an C<.> (I<dot> character) on its own line,
+followed by an C</> on its own line;
+
+=item *
+
+an C</> on its own line regardless of the preceding characters
+(only if the C<slash_terminates> option, explained below, is set).
 
 =back
+
+The multi-line terminators above are always treated as a single token, that is
+they are discarded (or returned) as a whole (regardless of the
+C<slash_terminates> option value).
+
+If your statements are to be fed to a DBMS, you are advised to keep this option
+to its default (false) value, since some drivers/DBMSs don't want the terminator
+to be present at the end of the (single) statement.
 
 (Note that the last, possibly empty, statement of a given SQL text, never has a
 trailing terminator. See below for an example.)
@@ -609,7 +947,36 @@ string from the returned statements:
     
     $sql_string eq join '', @verbatim_statements; # Always true, given the constructor above.
 
-Other than this, again, you are highly recommended to stick with the defaults.
+Other than this, again, you are recommended to stick with the defaults.
+
+=head3 DBMSs Specific Options
+
+The same syntactic structure can have different semantics across different SQL
+dialects, so sometimes it is necessary to help the parser to make the right
+decision. This is the function of these options.
+
+=over 4
+
+=item * C<slash_terminates>
+
+A Boolean option which causes, when set to a true value (which is the default),
+a C</> (I<forward-slash>) on its own line, even without a preceding semicolon,
+to be admitted as a (possible) terminator.
+
+If set to false, a forward-slash on its own line is treated as a statement
+terminator only if preceded by a semicolon or by a dot and a semicolon.
+
+If you are dealing with Oracle's SQL, you should let this option set, since a
+slash (alone, without a preceding semicolon) is often used as a terminator, as
+it is permitted by SQL*Plus (on non-I<block> statements).
+
+With SQL dialects other than Oracle, there is the (theoretical) possibility that
+a slash on its own line can pass the additional checks and be considered a
+terminator (while it shouldn't). This chance should be really tiny (it has never
+been observed in real world code indeed). Though negligible, by setting this
+option to false that risk can anyway be ruled out.
+
+=back
 
 =head2 C<split>
 
@@ -637,7 +1004,7 @@ true value):
     
     my @statements = $sql_splitter->split( 'SELECT 1;' );
     
-    print 'The SQL code contains ' . scalar(@statements) . ' statements.';
+    print 'The SQL code contains ' . Scalar(@statements) . ' statements.';
     # The SQL code contains 2 statements.
 
 =head2 C<split_with_placeholders>
@@ -657,18 +1024,15 @@ is a reference to the list of the atomic statements exactly as returned by the
 C<split> method, while the second is a reference to the list of the number of
 placeholders as explained above.
 
-Currently the only recognized placeholders are the C<?> (question mark)
-characters.
-
 Here is an example:
 
     # 4 statements (valid SQLite SQL)
-my $sql_code = <<'SQL';
+    my $sql_code = <<'SQL';
     CREATE TABLE state (id, name);
     INSERT INTO  state (id, name) VALUES (?, ?);
     CREATE TABLE city  (id, name, state_id);
     INSERT INTO  city  (id, name, state_id) VALUES (?, ?, ?)
-SQL
+    SQL
     
     my $splitter = SQL::SplitStatement->new;
     
@@ -680,6 +1044,25 @@ SQL
 where the returned C<$placeholders> list(ref) is to be read as follows: the
 first statement contains 0 placeholders, the second 2, the third 0 and the
 fourth 3.
+
+The recognized placeholders are:
+
+=over 4
+
+=item *
+
+I<question mark> placeholders, represented by the C<?> character;
+
+=item *
+
+I<dollar sign numbered> placeholders, represented by the
+C<$1, $2, ..., $n> strings;
+
+=item *
+
+I<named parameters>, such as C<:foo>, C<:bar>, C<:baz> etc.
+
+=back
 
 =head2 C<keep_terminators>
 
@@ -733,80 +1116,77 @@ Getter/setter method for the C<keep_empty_statements> option explained above.
 
 =back
 
-=head1 SUPPORTED DBMSs
-
-SQL::SplitStatement aims to cover the widest possible range of DBMSs, SQL
-dialects and extensions (even proprietary), in a fully transparent way for the
-user.
-
-Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
-
-=head1 LIMITATIONS
-
-To be split correctly, the given SQL code is subject to the following
-limitations, mainly concerning procedural code (the limitation about the use
-of some keywords as unquoted identifiers affecting the previous releases, has
-now been eliminated).
+=head2 C<slash_terminates>
 
 =over 4
 
-=item * Procedural extensions
+=item * C<< $sql_splitter->slash_terminates >>
 
-Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL>
-is correctly recognized, as well as I<bare> C<BEGIN ... END> blocks and
-I<dollar quoted> blocks, therefore a wide range of procedural extensions should
-be handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been
-tested so far.
+=item * C<< $sql_splitter->slash_terminates( $boolean ) >>
+
+Getter/setter method for the C<slash_terminates> option explained above.
+
+=back
+
+=head1 SUPPORTED DBMSs
+
+SQL::SplitStatement aims to cover the widest possible range of DBMSs, SQL
+dialects and extensions (even proprietary), in a (nearly) fully transparent way
+for the user.
+
+Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
+
+=head2 Procedural Extensions
+
+Procedural code is by far the most complex to handle.
+
+Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL> is
+correctly recognized, as well as I<anonymous> C<BEGIN ... END> blocks,
+I<dollar quoted> blocks and blocks delimited by a C<DELIMITER>-defined
+I<custom terminator>, therefore a wide range of procedural extensions should be
+handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been tested
+so far.
 
 If you need also other procedural languages to be recognized, please let me know
 (possibly with some test cases).
 
-=item * PL/SQL
+=head1 LIMITATIONS
 
-If a I<package> contains also an I<initialization block>, then it must terminate
-with a semicolon and a slash, or it must have the package name after the C<END>
-of package (which is the recommended practice anyway).
+Bound to be plenty, given the heuristic nature of this module (and its ambitious
+goals). However, no limitations are currently known.
 
-For example, these two package (pseudo-)definitions will be correctly split:
-
-    -- OK since it has the trailing slash
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN
-        ...
-    END;
-    /
-    
-    -- OK since it has the package name after the END
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN
-        ...
-    END my_package;
-
-while this one wouldn't, since it contains an initialization block and it lacks
-both the package name after the C<END> and the trailing slash:
-
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN -- initialization block starts here
-        ...
-    END;
-
-Note however that if the initialization block is absent, the package block will
-be correctly isolated even if it lacks both the package name after the C<END>
-and the trailing slash.
-
-=back
+Please report any problematic test case.
 
 =head2 Non-limitations
 
 To be split correctly, the given input must, in general, be syntactically valid
 SQL. For example, an unbalanced C<BEGIN> or a misspelled keyword could, under
 certain circumstances, confuse the parser and make it trip over the next
-statement terminator, thus returning wrongly split statements.
+statement terminator, thus returning non-split statements.
 This should not be a problem though, as the original (invalid) SQL code would
 have been unusable anyway (remember that this is NOT a validating parser!)
+
+=head1 SHOWCASE
+
+To test the capabilities of this module, you can run it
+(or rather run L<sql-split>) on the files C<t/data/sakila-schema.sql> and
+C<t/data/pagila-schema.sql> included in the distribution, which contain two
+quite large and complex I<real world> sample db schemata, for MySQL and
+PostgreSQL respectively.
+
+For more information:
+
+=over 4
+
+=item *
+
+Sakila db: L<http://dev.mysql.com/doc/sakila/en/sakila.html>
+
+=item *
+
+Pagila db: L<http://pgfoundry.org/projects/dbsamples>
+
+=back
 
 =head1 DEPENDENCIES
 
@@ -814,13 +1194,25 @@ SQL::SplitStatement depends on the following modules:
 
 =over 4
 
-=item * L<Class::Accessor::Fast>
+=item *
 
-=item * L<List::MoreUtils>
+L<Carp>
 
-=item * L<Regexp::Common>
+=item *
 
-=item * L<SQL::Tokenizer>
+L<Class::Accessor::Fast>
+
+=item *
+
+L<List::MoreUtils>
+
+=item *
+
+L<Regexp::Common>
+
+=item *
+
+L<SQL::Tokenizer> 0.20 or newer
 
 =back
 
@@ -840,7 +1232,7 @@ on your bug as I make changes.
 
 =head1 SUPPORT
 
-You can find documentation for this module with the perldoc command.
+You can find documentation for this module with the perldoc command:
 
     perldoc SQL::SplitStatement
 
@@ -875,9 +1267,13 @@ this module a joke.
 
 =over 4
 
-=item * L<DBIx::MultiStatementDo>
+=item *
 
-=item * L<sql-split>
+L<DBIx::MultiStatementDo>
+
+=item *
+
+L<sql-split>
 
 =back
 

@@ -52,7 +52,7 @@ $expected_placeholders = [0, 2, 0, 3];
 
 is_deeply(
     $placeholders, $expected_placeholders,
-    'Placeholders correctly calculated'
+    'Placeholders count'
 );
 
 $splitter = SQL::SplitStatement->new(

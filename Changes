@@ -2,6 +2,44 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+* PL/SQL PACKAGE limitation removed: now a PACKAGE with an initialization block
+  is correctly recognized even if it lacks both the package name and the slash
+  terminator.
+
+* PL/SQL parser fully rewritten again.
+
+* Added terminator: semicolon followed by a period on its own line
+  followed by a forward slash on its own line.
+
+* Extended dollar-quoted strings handling, that is, strings like "$TAG$", are
+  now handled correctly (whereas before only "$$" was permitted as a
+  dollar-quote).
+
+* Two new types of placeholders added: /dollar sign numbers/ ($1, $2, ..., $n)
+  and /named parameters/ (:foo, :bar).
+
+* PL/SQL "DECLARE CURSOR" handling;
+
+* Fixed missing PL/SQL "END CASE" check;
+
+* Fixed a bug with DELIMITER-defined terminators when their scope persisted over
+  multiple statements.
+
+* Fixed a bug which caused certain DELIMITER-defined terminators not to be
+  removed in the returned statements (when "keep_terminators" was set to false).
+
+* Many further improvements and fixes.
+
+* Added the new "slash_terminates" option (NOT a change in the default behavior,
+  but please read the docs).
+
+* Massive test additions (the two popular Sakila and Pagila sample db now
+  included).
+
+* Docs updates.
+
+* Markdown README added (via Dist::Zilla::Plugin::ReadmeMarkdownFromPod).
+
 0.30000       2011-01-23 11:00:02 Europe/Rome
 
 * Fixed a PL/SQL problem where a FUNCTION or PROCEDURE inside a PACKAGE, could
@@ -129,7 +167,7 @@ Revision history for SQL-SplitStatement
 * Added the ability to discard/keep comments.
   Really, this is a change in the API, since now comments are discarded by
   default, while before they were returned instead.
-  I hope that this won't harm any user, given the young age of this module
+  I hope this won't harm any user, given the young age of this module
   (furthermore there isn't any difference when feeding the returned statements
   to a DBMS, the differences are just /cosmetic/).
   Sorry anyway!

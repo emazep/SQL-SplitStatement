@@ -15,6 +15,8 @@ use warnings;
 
 use SQL::SplitStatement;
 
+our $VERSION = $SQL::SplitStatement::VERSION;
+
 use Getopt::Long;
 Getopt::Long::Configure qw(
     auto_help auto_version bundling require_order gnu_compat
@@ -26,10 +28,11 @@ use Pod::Usage;
 my $man;
 my $help;
 
-my $keep_terminator;
+my $keep_terminators;
 my $keep_comments;
 my $keep_empty_statements;
 my $keep_extra_spaces;
+my $slash_terminates;
 
 # Global variables (UPPERCASED)
 my $OUTPUT_STATEMENT_SEP = "\n--\n";
@@ -41,10 +44,11 @@ GetOptions(
     'help|h|?' => \$help,
     'man'      => \$man,
     
-    'terminators|T!'            => \$keep_terminator,
+    'terminators|T!'            => \$keep_terminators,
     'extra-spaces|spaces|S!'    => \$keep_extra_spaces,
     'comments|C!'               => \$keep_comments,
     'empty-statements|empty|E!' => \$keep_empty_statements,
+    'slash-terminates|slash!'   => \$slash_terminates,
     
     'output-statement-separator|oss|s=s' => \$OUTPUT_STATEMENT_SEP,
     'output-file-separator|ofs|f=s'      => \$OUTPUT_FILE_SEP,
@@ -67,10 +71,11 @@ die qq[Illegal on_error value: "$ON_ERROR"]
     ? \&split_and_gather_statements : \&split_and_print_statements;
 
 my $SPLITTER = SQL::SplitStatement->new(
-    keep_terminator       => $keep_terminator,
+    keep_terminators      => $keep_terminators,
     keep_extra_spaces     => $keep_extra_spaces,
     keep_comments         => $keep_comments,
-    keep_empty_statements => $keep_empty_statements
+    keep_empty_statements => $keep_empty_statements,
+    slash_terminates      => $slash_terminates
 );
 
 my $OUTPUT = '';
@@ -138,8 +143,6 @@ interactively.
 
 Consider however that this is by no means a validating parser, so that errors in
 SQL code will not be detected (and can even lead to incorrect splitting).
-Additionally, this program is subject to some further (hopefully minor)
-limitations (for the details, please see the L</LIMITATIONS> section below).
 
 =head1 OPTIONS
 
@@ -152,16 +155,33 @@ The strings currently recognized as terminators (depending on the context) are:
 
 =over 4
 
-=item * C<;> (the I<semicolon> character);
+=item *
 
-=item * C</> (the I<forward-slash> character);
+C<;> (the I<semicolon> character);
 
-=item * a semicolon followed by a forward-slash on its own line (which is
-treated as a single token);
+=item *
 
-=item * any string defined by the C<DELIMITER> command.
+any string defined by the MySQL C<DELIMITER> command;
+
+=item *
+
+an C<;> followed by an C</> (I<forward-slash> character) on its own line;
+
+=item *
+
+an C<;> followed by an C<.> (I<dot> character) on its own line,
+followed by an C</> on its own line;
+
+=item *
+
+an C</> on its own line regardless of the preceding characters
+(only if the C<slash_terminates> option, explained below, is set).
 
 =back
+
+The multi-line terminators above are always treated as a single token, that is
+they are discarded (or returned) as a whole (regardless of the
+C<--no-slash-terminates> option value).
 
 =head2 -S, --spaces, --extra-spaces
 
@@ -186,6 +206,25 @@ recognized as empty and it is therefore returned, if the C<--comments> option is
 used. Note instead that an empty statement is recognized as such regardless of
 the use of the C<--terminators> and C<--extra-spaces> options.
 
+=head2 --no-slash, --no-slash-terminates
+
+By default a C</> (I<forward-slash>) on its own line, even without a preceding
+semicolon, is admitted as a candidate terminator.
+
+When this option is used instead, a forward-slash on its own line is treated as
+a statement terminator only if preceded by a semicolon or by a dot and a
+semicolon.
+
+If you are dealing with Oracle's SQL, you should not use this option, since a
+slash (alone, without a preceding semicolon) is often used as a terminator, as
+it is permitted by SQL*Plus (on non-I<block> statements).
+
+With SQL dialects other than Oracle, there is the (theoretical) possibility that
+a slash on its own line could pass the additional checks and be considered a
+terminator (while it shouldn't). This chance should be really tiny (it has never
+been observed in real world code indeed). Though negligible, this option will
+anyway rule out that risk.
+
 =head2 -s, --oss, --output-statement-separator I<string>
 
 The string which will be printed between every pair of returned atomic
@@ -209,21 +248,27 @@ after the last file.
 
 =head2 -e, --error, --on-error I<value>
 
-It controls the program behaviour in case one of the given files is not
+It controls the program behavior in case one of the given files is not
 accessible.
 
 It can take the following values:
 
 =over 4
 
-=item * C<stop> or C<0>, which causes the program to die at the first file which
-can not be opened, but it prints all the statements split that far (this is the
-default value);
+=item *
 
-=item * C<continue> or C<1>, which causes the program, when it encounters a file
+C<stop> or C<0>, which causes the program to die at the first file which
+can not be opened, but it prints all the statements split that far (this is the
+default);
+
+=item *
+
+C<continue> or C<1>, which causes the program, when it encounters a file
 error, to just emit a warning (on STDERR) and continue with the next file;
 
-=item * C<no-output> or C<2>, which, just like C<stop>, causes the program to
+=item *
+
+C<no-output> or C<2>, which, just like C<stop>, causes the program to
 die at the first file error, but in this case it does not print any statement,
 not even those coming from the previous (already read) files; in other words,
 the statements are printed out only if (and after) all of the given files have
@@ -248,69 +293,32 @@ It prints the program version and exits.
 =head1 SUPPORTED DBMSs
 
 sql-split aims to cover the widest possible range of DBMSs, SQL dialects and
-extensions (even proprietary), in a fully transparent way for the user.
+extensions (even proprietary), in a (nearly) fully transparent way for the user.
 
 Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
 
-=head1 LIMITATIONS
+=head2 Procedural Extensions
 
-To be split correctly, the given SQL code is subject to the following
-limitations, mainly concerning procedural code.
-
-=over 4
-
-=item * Procedural extensions
+Procedural code is by far the most complex to handle.
 
 Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL> is
-correctly recognized, as well as I<bare> C<BEGIN ... END> blocks and I<dollar
-quoted> blocks, therefore a wide range of procedural extensions should be
-handled correctly. However, only PL/SQL and PL/PgSQL code has been tested so
-far.
+correctly recognized, as well as I<anonymous> C<BEGIN ... END> blocks,
+I<dollar quoted> blocks and blocks delimited by a C<DELIMITER>-defined
+I<custom terminator>, therefore a wide range of procedural extensions should be
+handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been tested
+so far.
 
-=item * PL/SQL
+=head1 LIMITATIONS
 
-If a I<package> contains also an I<initialization block>, then it must terminate
-with a semicolon and a slash, or it must have the package name after the C<END>
-of package (which is the recommended practice anyway).
-
-For example, these two package (pseudo-)definitions will be correctly split:
-
-    -- OK since it has the trailing slash
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN
-        ...
-    END;
-    /
-    
-    -- OK since it has the package name after the END
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN
-        ...
-    END my_package;
-
-while this one wouldn't, since it contains an initialization block and it lacks
-both the package name after the C<END> and the trailing slash:
-
-    CREATE OR REPLACE PACKAGE BODY my_package AS
-        ...
-    BEGIN -- initialization block starts here
-        ...
-    END;
-
-Note however that if the initialization block is absent, the package block will
-be correctly isolated even if it lacks both the package name after the C<END>
-and the trailing slash.
-
-=back
+None currently known (other than the lack of tests on SQL dialects different
+from the ones described above).
 
 =head2 Non-limitations
 
 To be split correctly, the given input must, in general, be syntactically valid
 SQL. For example, an unbalanced C<BEGIN> or a misspelled keyword could, under
 certain circumstances, confuse the parser and make it trip over the next
-statement terminator, thus returning wrongly split statements. This should not
+statement terminator, thus returning non-split statements. This should not
 be a problem though, as the original (invalid) SQL code would have been unusable
 anyway (remember that this is NOT a validating parser!)
 
@@ -318,7 +326,9 @@ anyway (remember that this is NOT a validating parser!)
 
 =over 4
 
-=item * L<SQL::SplitStatement> (perldoc SQL::SplitStatement)
+=item *
+
+L<SQL::SplitStatement> (perldoc SQL::SplitStatement)
 
 =back
 
@@ -341,4 +351,3 @@ people, including, but not limited to, diarrhoea, gonorrhea and dysmenorrhea.
 Don't say you haven't been warned.
 
 =cut
-

@@ -5,11 +5,12 @@ use warnings;
 
 use SQL::SplitStatement;
 
-use Test::More tests => 4;
+use Test::More tests => 8;
 
 my $sql_code;
 my $splitter;
 my @statements;
+my @endings;
 
 $sql_code = <<'SQL';
   CREATE PACKAGE emp_actions AS
@@ -139,6 +140,7 @@ CREATE PACKAGE BODY bank_transactions AS
          new_status := SUBSTR(SQLERRM,1,70);
    END debit_account;
 END bank_transactions;
+/
 
   CREATE PACKAGE BODY emp_actions AS
      number_hired INT;  -- visible only in this package
@@ -176,9 +178,6 @@ SQL
 $splitter = SQL::SplitStatement->new;
 
 @statements = $splitter->split( $sql_code );
-
-#use Data::Dump qw(dump);
-#die dump( @statements );
 
 cmp_ok(
     @statements, '==', 5,
@@ -219,3 +218,20 @@ is(
     join( '', @statements ), $sql_code,
     'SQL code rebuilt'
 );
+
+@endings = qw|
+    emp_actions
+    bank_transactions
+    bank_transactions
+    emp_actions
+|;
+
+$splitter->keep_extra_spaces(0);
+$splitter->keep_empty_statements(0);
+$splitter->keep_terminators(0);
+$splitter->keep_comments(0);
+@statements = $splitter->split( $sql_code );
+
+like( $statements[$_], qr/\Q$endings[$_]\E$/, 'Statement ' . ($_+1) . ' check' )
+    for 0..$#endings;
+

@@ -12,7 +12,7 @@ use Test::More tests => 1;
 
 my $sql_code = <<'SQL';
 create or replace procedure test (num1 number) is
-v_test varchar2;
+v_test varchar2 is
 begin
 select col1
 into v_test

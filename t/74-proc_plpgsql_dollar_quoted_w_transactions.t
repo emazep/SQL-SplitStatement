@@ -5,7 +5,7 @@ use warnings;
 
 use SQL::SplitStatement;
 
-use Test::More tests => 3;
+use Test::More tests => 22;
 
 my $sql_code = <<'SQL';
 BEGIN;
@@ -75,10 +75,30 @@ COMMIT;
 
 DROP FUNCTION somefunc(integer);
 
+CREATE TABLE t1 (a integer PRIMARY KEY);
+
+CREATE FUNCTION test_exception() RETURNS boolean LANGUAGE plpgsql AS
+$$BEGIN
+   INSERT INTO t1 (a) VALUES (1);
+   INSERT INTO t1 (a) VALUES (2);
+   INSERT INTO t1 (a) VALUES (1);
+   INSERT INTO t1 (a) VALUES (3);
+   RETURN TRUE;
+EXCEPTION
+   WHEN integrity_constraint_violation THEN
+      RAISE NOTICE 'Rollback to savepoint';
+      RETURN FALSE;
+END;$$;
+
+BEGIN;
+
+SELECT test_exception();
+
 SQL
 
 my $splitter;
 my @statements;
+my @endings;
 my ($statement, $placeholders);
 
 $splitter = SQL::SplitStatement->new;
@@ -86,7 +106,7 @@ $splitter = SQL::SplitStatement->new;
 @statements = $splitter->split( $sql_code );
 
 cmp_ok(
-    @statements, '==', 15,
+    @statements, '==', 19,
     'Statements correctly split'
 );
 
@@ -109,3 +129,35 @@ cmp_ok(
     $placeholders->[3], '==', 2,
     'Statements correctly split'
 );
+
+@endings = qw|
+    BEGIN
+    'PL/pgSQL'
+    my_savepoint
+    ?)
+    my_savepoint
+    ret)
+    plpgsql
+    COMMIT
+    TRANSACTION
+    fib_fast(integer)
+    COMMIT
+    SERIALIZABLE
+    plpgsql
+    COMMIT
+    somefunc(integer)
+    KEY)
+    END;$$
+    BEGIN
+    test_exception()
+|;
+
+$splitter->keep_extra_spaces(0);
+$splitter->keep_empty_statements(0);
+$splitter->keep_terminators(0);
+$splitter->keep_comments(0);
+@statements = $splitter->split( $sql_code );
+
+like( $statements[$_], qr/\Q$endings[$_]\E$/, 'Statement ' . ($_+1) . ' check' )
+    for 0..$#endings;
+
