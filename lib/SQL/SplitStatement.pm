@@ -422,7 +422,7 @@ sub split_with_placeholders {
         while ( my ($statement, $terminator, $placeholder_num) = $sp->() ) {
             my $only_terminator_re
                 = $terminator->[0] && $terminator->[0] == CUSTOM_DELIMITER
-                ? qr/^\s*$terminator->[1]?\s*$/
+                ? qr/^\s*\Q$terminator->[1]\E?\s*$/
                 : qr/^\s*$terminator_re?\z/;
             unless ( $statement =~ $only_terminator_re ) {
                 push @filtered_statements, $statement;
@@ -831,26 +831,17 @@ are:
 
 =over 4
 
-=item *
+=item * C<;> (the I<semicolon> character);
 
-C<;> (the I<semicolon> character);
+=item * any string defined by the MySQL C<DELIMITER> command;
 
-=item *
+=item * an C<;> followed by an C</> (I<forward-slash> character) on its own
+line;
 
-any string defined by the MySQL C<DELIMITER> command;
-
-=item *
-
-an C<;> followed by an C</> (I<forward-slash> character) on its own line;
-
-=item *
-
-an C<;> followed by an C<.> (I<dot> character) on its own line,
+=item * an C<;> followed by an C<.> (I<dot> character) on its own line,
 followed by an C</> on its own line;
 
-=item *
-
-an C</> on its own line regardless of the preceding characters
+=item * an C</> on its own line regardless of the preceding characters
 (only if the C<slash_terminates> option, explained below, is set).
 
 =back
@@ -869,8 +860,8 @@ trailing terminator. See below for an example.)
 =item * C<keep_terminator>
 
 An alias for the the C<keep_terminators> option explained above.
-Note that if C<keep_terminators> and C<keep_terminator> are both set at object
-construction time, C<new> throws an exception.
+Note that if C<keep_terminators> and C<keep_terminator> are both passed to
+C<new>, an exception is thrown.
 
 =item * C<keep_extra_spaces>
 
@@ -1049,18 +1040,12 @@ The recognized placeholders are:
 
 =over 4
 
-=item *
+=item * I<question mark> placeholders, represented by the C<?> character;
 
-I<question mark> placeholders, represented by the C<?> character;
-
-=item *
-
-I<dollar sign numbered> placeholders, represented by the
+=item * I<dollar sign numbered> placeholders, represented by the
 C<$1, $2, ..., $n> strings;
 
-=item *
-
-I<named parameters>, such as C<:foo>, C<:bar>, C<:baz> etc.
+=item * I<named parameters>, such as C<:foo>, C<:bar>, C<:baz> etc.
 
 =back
 
@@ -1178,13 +1163,9 @@ For more information:
 
 =over 4
 
-=item *
+=item * Sakila db: L<http://dev.mysql.com/doc/sakila/en/sakila.html>
 
-Sakila db: L<http://dev.mysql.com/doc/sakila/en/sakila.html>
-
-=item *
-
-Pagila db: L<http://pgfoundry.org/projects/dbsamples>
+=item * Pagila db: L<http://pgfoundry.org/projects/dbsamples>
 
 =back
 
@@ -1194,21 +1175,13 @@ SQL::SplitStatement depends on the following modules:
 
 =over 4
 
-=item *
+=item * L<Carp>
 
-L<Carp>
+=item * L<Class::Accessor::Fast>
 
-=item *
+=item * L<List::MoreUtils>
 
-L<Class::Accessor::Fast>
-
-=item *
-
-L<List::MoreUtils>
-
-=item *
-
-L<Regexp::Common>
+=item * L<Regexp::Common>
 
 =item *
 

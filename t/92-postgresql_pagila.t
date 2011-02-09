@@ -44,9 +44,9 @@ cmp_ok(
         ''
         false
     |,
-    qw|) postgres| x 3,
+    ( ')', 'postgres' ) x 3,
     qw|IMMUTABLE postgres ) postgres 1 postgres ) postgres 1 postgres|,
-    qw|) postgres| x 3,
+    ( ')', 'postgres' ) x 3,
     qw|a.last_name|
 );
 

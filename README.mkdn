@@ -4,7 +4,7 @@ SQL::SplitStatement - Split any SQL code into atomic statements
 
 # VERSION
 
-version 1.00000
+version 1.00009
 
 # SYNOPSIS
 
@@ -98,26 +98,17 @@ When set to a true value, the terminators are kept instead.
 The possible terminators (which are treated as such depending on the context)
 are:
 
-    - *
+    - * `;` (the _semicolon_ character);
 
-    `;` (the _semicolon_ character);
+    - * any string defined by the MySQL `DELIMITER` command;
 
-    - *
+    - * an `;` followed by an `/` (_forward-slash_ character) on its own
+    line;
 
-    any string defined by the MySQL `DELIMITER` command;
-
-    - *
-
-    an `;` followed by an `/` (_forward-slash_ character) on its own line;
-
-    - *
-
-    an `;` followed by an `.` (_dot_ character) on its own line,
+    - * an `;` followed by an `.` (_dot_ character) on its own line,
     followed by an `/` on its own line;
 
-    - *
-
-    an `/` on its own line regardless of the preceding characters
+    - * an `/` on its own line regardless of the preceding characters
     (only if the `slash_terminates` option, explained below, is set).
 
 The multi-line terminators above are always treated as a single token, that is
@@ -134,8 +125,8 @@ trailing terminator. See below for an example.)
 - * `keep_terminator`
 
 An alias for the the `keep_terminators` option explained above.
-Note that if `keep_terminators` and `keep_terminator` are both set at object
-construction time, `new` throws an exception.
+Note that if `keep_terminators` and `keep_terminator` are both passed to
+`new`, an exception is thrown.
 
 - * `keep_extra_spaces`
 
@@ -307,18 +298,12 @@ fourth 3.
 
 The recognized placeholders are:
 
-- *
+- * _question mark_ placeholders, represented by the `?` character;
 
-_question mark_ placeholders, represented by the `?` character;
-
-- *
-
-_dollar sign numbered_ placeholders, represented by the
+- * _dollar sign numbered_ placeholders, represented by the
 `$1, $2, ..., $n` strings;
 
-- *
-
-_named parameters_, such as `:foo`, `:bar`, `:baz` etc.
+- * _named parameters_, such as `:foo`, `:bar`, `:baz` etc.
 
 ## `keep_terminators`
 
@@ -412,33 +397,21 @@ PostgreSQL respectively.
 
 For more information:
 
-- *
+- * Sakila db: [http://dev.mysql.com/doc/sakila/en/sakila.html](http://dev.mysql.com/doc/sakila/en/sakila.html)
 
-Sakila db: [http://dev.mysql.com/doc/sakila/en/sakila.html](http://dev.mysql.com/doc/sakila/en/sakila.html)
-
-- *
-
-Pagila db: [http://pgfoundry.org/projects/dbsamples](http://pgfoundry.org/projects/dbsamples)
+- * Pagila db: [http://pgfoundry.org/projects/dbsamples](http://pgfoundry.org/projects/dbsamples)
 
 # DEPENDENCIES
 
 SQL::SplitStatement depends on the following modules:
 
-- *
+- * [Carp](http://search.cpan.org/perldoc?Carp)
 
-[Carp](http://search.cpan.org/perldoc?Carp)
+- * [Class::Accessor::Fast](http://search.cpan.org/perldoc?Class::Accessor::Fast)
 
-- *
+- * [List::MoreUtils](http://search.cpan.org/perldoc?List::MoreUtils)
 
-[Class::Accessor::Fast](http://search.cpan.org/perldoc?Class::Accessor::Fast)
-
-- *
-
-[List::MoreUtils](http://search.cpan.org/perldoc?List::MoreUtils)
-
-- *
-
-[Regexp::Common](http://search.cpan.org/perldoc?Regexp::Common)
+- * [Regexp::Common](http://search.cpan.org/perldoc?Regexp::Common)
 
 - *
 

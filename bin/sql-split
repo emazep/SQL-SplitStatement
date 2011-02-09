@@ -155,26 +155,17 @@ The strings currently recognized as terminators (depending on the context) are:
 
 =over 4
 
-=item *
+=item * C<;> (the I<semicolon> character);
 
-C<;> (the I<semicolon> character);
+=item * any string defined by the MySQL C<DELIMITER> command;
 
-=item *
+=item * an C<;> followed by an C</> (I<forward-slash> character) on its own
+line;
 
-any string defined by the MySQL C<DELIMITER> command;
-
-=item *
-
-an C<;> followed by an C</> (I<forward-slash> character) on its own line;
-
-=item *
-
-an C<;> followed by an C<.> (I<dot> character) on its own line,
+=item * an C<;> followed by an C<.> (I<dot> character) on its own line,
 followed by an C</> on its own line;
 
-=item *
-
-an C</> on its own line regardless of the preceding characters
+=item * an C</> on its own line regardless of the preceding characters
 (only if the C<slash_terminates> option, explained below, is set).
 
 =back
@@ -326,9 +317,7 @@ anyway (remember that this is NOT a validating parser!)
 
 =over 4
 
-=item *
-
-L<SQL::SplitStatement> (perldoc SQL::SplitStatement)
+=item * L<SQL::SplitStatement> (perldoc SQL::SplitStatement)
 
 =back
 

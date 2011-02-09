@@ -2,6 +2,16 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+* Fixed a corner case where an empty statement was not removed (upon request)
+  if it was closed by a /strange/ DELIMITER-defined terminator.
+
+* Added a test for this.
+
+* Fixed "t/90-mysql_sakila.t" and "t/92-postgresql_pagila.t" for older Perls
+  (pre 5.8.7 it seems). Thank you CPAN Testers!
+
+* POD formatting fixes to obtain a better (automatically generated) README.mkdn.
+
 1.00000       2011-02-09 01:40:58 Europe/Rome
 
 * PL/SQL PACKAGE limitation removed: now a PACKAGE with an initialization block

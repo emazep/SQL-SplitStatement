@@ -47,7 +47,7 @@ cmp_ok(
     q[a.last_name]             ,
     q[//]                      ,
     q[END]                     ,
-    qw( ; $$ END     ) x  5    ,
+    ( ';', '$$', 'END' ) x  5  ,
     q[;]                       ,
     q[SQL_MODE=@OLD_SQL_MODE]  ,
     q[=@OLD_FOREIGN_KEY_CHECKS],
