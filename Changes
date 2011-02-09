@@ -2,6 +2,8 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+1.00000       2011-02-09 01:40:58 Europe/Rome
+
 * PL/SQL PACKAGE limitation removed: now a PACKAGE with an initialization block
   is correctly recognized even if it lacks both the package name and the slash
   terminator.
