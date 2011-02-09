@@ -2,6 +2,8 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+1.00009       2011-02-09 10:37:48 Europe/Rome
+
 * Fixed a corner case where an empty statement was not removed (upon request)
   if it was closed by a /strange/ DELIMITER-defined terminator.
 
