@@ -8,9 +8,7 @@ version 1.00020
 
 # SYNOPSIS
 
-    
-
-# Multiple SQL statements in a single string
+    # Multiple SQL statements in a single string
 my $sql_code = <<'SQL';
 CREATE TABLE parent(a, b, c   , d    );
 CREATE TABLE child (x, y, "w;", "z;z");
@@ -272,22 +270,22 @@ placeholders as explained above.
 Here is an example:
 
     # 4 statements (valid SQLite SQL)
-    my $sql_code = <<'SQL';
-    CREATE TABLE state (id, name);
-    INSERT INTO  state (id, name) VALUES (?, ?);
-    CREATE TABLE city  (id, name, state_id);
-    INSERT INTO  city  (id, name, state_id) VALUES (?, ?, ?)
-    SQL
+my $sql_code = <<'SQL';
+CREATE TABLE state (id, name);
+INSERT INTO  state (id, name) VALUES (?, ?);
+CREATE TABLE city  (id, name, state_id);
+INSERT INTO  city  (id, name, state_id) VALUES (?, ?, ?)
+SQL
     
 
-    my $splitter = SQL::SplitStatement->new;
+my $splitter = SQL::SplitStatement->new;
     
 
-    my ( $statements, $placeholders )
-        = $splitter->split_with_placeholders( $sql_code );
+my ( $statements, $placeholders )
+    = $splitter->split_with_placeholders( $sql_code );
     
 
-    # $placeholders now is: [0, 2, 0, 3]
+# $placeholders now is: [0, 2, 0, 3]
 
 where the returned `$placeholders` list(ref) is to be read as follows: the
 first statement contains 0 placeholders, the second 2, the third 0 and the
@@ -399,7 +397,7 @@ SQL::SplitStatement depends on the following modules:
 - [Class::Accessor::Fast](http://search.cpan.org/perldoc?Class::Accessor::Fast)
 - [List::MoreUtils](http://search.cpan.org/perldoc?List::MoreUtils)
 - [Regexp::Common](http://search.cpan.org/perldoc?Regexp::Common)
-- [SQL::Tokenizer](http://search.cpan.org/perldoc?SQL::Tokenizer) 0.20 or newer
+- [SQL::Tokenizer](http://search.cpan.org/perldoc?SQL::Tokenizer) 0.22 or newer
 
 # AUTHOR
 
