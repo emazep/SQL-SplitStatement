@@ -2,6 +2,8 @@ Revision history for SQL-SplitStatement
 
 {{$NEXT}}
 
+1.00020       2011-03-26 11:05:02 Europe/Rome
+
    * Emergency release: fixed several problems caused by the new
      SQL::Tokenizer (0.21 and above) releases. SQL::Tokenizer 0.22 now
      required.
