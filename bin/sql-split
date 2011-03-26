@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 
 ###########################################################################
-# Copyright 2011 Emanuele Zeppieri.                                       #
+# Copyright 2011 Emanuele Zeppieri                                        #
 #                                                                         #
 # This program is free software; you can redistribute it and/or modify it #
 # under the terms of either: the GNU General Public License as published  #
@@ -219,11 +219,11 @@ anyway rule out that risk.
 =head2 -s, --oss, --output-statement-separator I<string>
 
 The string which will be printed between every pair of returned atomic
-statements. By default, it is a C<--> (I<double dash>) on its own line.
+statements. By default, it is a S<C<-->> (I<double dash>) on its own line.
 
 To use special characters (such as newlines) when passing such string, please
 consult your shell docs (for example, in Bash the above mentioned default
-separator could be defined as C<$'\n--\n'>).
+separator could be defined as S<C<$'\n--\n'>>).
 
 Note that the last returned statement (for each processed file) will not be
 followed by such separator.
@@ -292,12 +292,12 @@ Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
 
 Procedural code is by far the most complex to handle.
 
-Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL> is
-correctly recognized, as well as I<anonymous> C<BEGIN ... END> blocks,
-I<dollar quoted> blocks and blocks delimited by a C<DELIMITER>-defined
-I<custom terminator>, therefore a wide range of procedural extensions should be
-handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been tested
-so far.
+Currently any block of code which start with C<FUNCTION>, C<PROCEDURE>,
+C<DECLARE>, C<CREATE> or C<CALL> is correctly recognized, as well as
+I<anonymous> C<BEGIN ... END> blocks, I<dollar quoted> blocks and blocks
+delimited by a C<DELIMITER>-defined I<custom terminator>, therefore a wide range
+of procedural extensions should be handled correctly. However, only PL/SQL,
+PL/PgSQL and MySQL code has been tested so far.
 
 =head1 LIMITATIONS
 

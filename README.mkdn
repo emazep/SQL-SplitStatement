@@ -4,44 +4,46 @@ SQL::SplitStatement - Split any SQL code into atomic statements
 
 # VERSION
 
-version 1.00009
+version 1.00020
 
 # SYNOPSIS
 
-    # Multiple SQL statements in a single string
-    my $sql_code = <<'SQL';
-    CREATE TABLE parent(a, b, c   , d    );
-    CREATE TABLE child (x, y, "w;", "z;z");
-    /* C-style comment; */
-    CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-        EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-    BEGIN
-        SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
-    END;
-    -- Standalone SQL; comment; with semicolons;
-    INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
-    SQL
     
 
-    use SQL::SplitStatement;
+# Multiple SQL statements in a single string
+my $sql_code = <<'SQL';
+CREATE TABLE parent(a, b, c   , d    );
+CREATE TABLE child (x, y, "w;", "z;z");
+/* C-style comment; */
+CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+    EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+BEGIN
+    SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
+END;
+-- Standalone SQL; comment; with semicolons;
+INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
+SQL
     
 
-    my $sql_splitter = SQL::SplitStatement->new;
-    my @statements = $sql_splitter->split($sql_code);
+use SQL::SplitStatement;
     
 
-    # @statements now is:
-    #
-    # (
-    #     'CREATE TABLE parent(a, b, c   , d    )',
-    #     'CREATE TABLE child (x, y, "w;", "z;z")',
-    #     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-    #     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-    # BEGIN
-    #     SELECT RAISE(ABORT, \'constraint failed;\');
-    # END',
-    #     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
-    # )
+my $sql_splitter = SQL::SplitStatement->new;
+my @statements = $sql_splitter->split($sql_code);
+    
+
+# @statements now is:
+#
+# (
+#     'CREATE TABLE parent(a, b, c   , d    )',
+#     'CREATE TABLE child (x, y, "w;", "z;z")',
+#     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+#     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+# BEGIN
+#     SELECT RAISE(ABORT, \'constraint failed;\');
+# END',
+#     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
+# )
 
 # DESCRIPTION
 
@@ -77,9 +79,8 @@ behavior you would probably want.
 
 ## `new`
 
-- * `SQL::SplitStatement->new( %options )`
-
-- * `SQL::SplitStatement->new( \%options )`
+- `SQL::SplitStatement->new( %options )`
+- `SQL::SplitStatement->new( \%options )`
 
 It creates and returns a new SQL::SplitStatement object. It accepts its options
 either as a hash or a hashref.
@@ -89,7 +90,7 @@ be grouped in two sets: [Formatting Options](#pod_Formatting Options) and [DBMSs
 
 ### Formatting Options
 
-- * `keep_terminators`
+- `keep_terminators`
 
 A Boolean option which causes, when set to a false value (which is the default),
 the trailing terminator token to be discarded in the returned atomic statements.
@@ -98,17 +99,13 @@ When set to a true value, the terminators are kept instead.
 The possible terminators (which are treated as such depending on the context)
 are:
 
-    - * `;` (the _semicolon_ character);
-
-    - * any string defined by the MySQL `DELIMITER` command;
-
-    - * an `;` followed by an `/` (_forward-slash_ character) on its own
-    line;
-
-    - * an `;` followed by an `.` (_dot_ character) on its own line,
-    followed by an `/` on its own line;
-
-    - * an `/` on its own line regardless of the preceding characters
+                    - `;` (the _semicolon_ character);
+                - any string defined by the MySQL `DELIMITER` command;
+            - an `;` followed by an `/` (_forward-slash_ character) on its own
+            line;
+        - an `;` followed by an `.` (_dot_ character) on its own line,
+        followed by an `/` on its own line;
+    - an `/` on its own line regardless of the preceding characters
     (only if the `slash_terminates` option, explained below, is set).
 
 The multi-line terminators above are always treated as a single token, that is
@@ -122,13 +119,13 @@ to be present at the end of the (single) statement.
 (Note that the last, possibly empty, statement of a given SQL text, never has a
 trailing terminator. See below for an example.)
 
-- * `keep_terminator`
+- `keep_terminator`
 
 An alias for the the `keep_terminators` option explained above.
 Note that if `keep_terminators` and `keep_terminator` are both passed to
 `new`, an exception is thrown.
 
-- * `keep_extra_spaces`
+- `keep_extra_spaces`
 
 A Boolean option which causes, when set to a false value (which is the default),
 the spaces (`\s`) around the statements to be trimmed.
@@ -140,7 +137,7 @@ then. This ensures that if `keep_extra_spaces` is set to false, the returned
 statements will never have trailing (nor leading) spaces, regardless of the
 `keep_terminators` value.
 
-- * `keep_comments`
+- `keep_comments`
 
 A Boolean option which causes, when set to a false value (which is the default),
 the comments to be discarded in the returned statements. When set to a true
@@ -165,7 +162,7 @@ previous statement (if it exists), as shown in this pseudo-SQL snippet:
     <statement2>
     -- This with statement2 as well
 
-- * `keep_empty_statements`
+- `keep_empty_statements`
 
 A Boolean option which causes, when set to a false value (which is the default),
 the empty statements to be discarded. When set to a true value, the empty
@@ -213,7 +210,7 @@ The same syntactic structure can have different semantics across different SQL
 dialects, so sometimes it is necessary to help the parser to make the right
 decision. This is the function of these options.
 
-- * `slash_terminates`
+- `slash_terminates`
 
 A Boolean option which causes, when set to a true value (which is the default),
 a `/` (_forward-slash_) on its own line, even without a preceding semicolon,
@@ -223,8 +220,8 @@ If set to false, a forward-slash on its own line is treated as a statement
 terminator only if preceded by a semicolon or by a dot and a semicolon.
 
 If you are dealing with Oracle's SQL, you should let this option set, since a
-slash (alone, without a preceding semicolon) is often used as a terminator, as
-it is permitted by SQL*Plus (on non-_block_ statements).
+slash (alone, without a preceding semicolon) is sometimes used as a terminator,
+as it is permitted by SQL*Plus (on non-_block_ statements).
 
 With SQL dialects other than Oracle, there is the (theoretical) possibility that
 a slash on its own line can pass the additional checks and be considered a
@@ -234,7 +231,7 @@ option to false that risk can anyway be ruled out.
 
 ## `split`
 
-- * `$sql_splitter->split( $sql_string )`
+- `$sql_splitter->split( $sql_string )`
 
 This is the method which actually splits the SQL code into its atomic
 components.
@@ -256,16 +253,16 @@ true value):
     my @statements = $sql_splitter->split( 'SELECT 1;' );
     
 
-    print 'The SQL code contains ' . Scalar(@statements) . ' statements.';
+    print 'The SQL code contains ' . scalar(@statements) . ' statements.';
     # The SQL code contains 2 statements.
 
 ## `split_with_placeholders`
 
-- * `$sql_splitter->split_with_placeholders( $sql_string )`
+- `$sql_splitter->split_with_placeholders( $sql_string )`
 
 It works exactly as the `split` method explained above, except that it returns
-also a list of integers, each of which is the number of the
-_unnamed placeholders_ contained in the corresponding atomic statement.
+also a list of integers, each of which is the number of the _placeholders_
+contained in the corresponding atomic statement.
 
 More precisely, its return value is a list of two elements, the first of which
 is a reference to the list of the atomic statements exactly as returned by the
@@ -298,18 +295,15 @@ fourth 3.
 
 The recognized placeholders are:
 
-- * _question mark_ placeholders, represented by the `?` character;
-
-- * _dollar sign numbered_ placeholders, represented by the
+- _question mark_ placeholders, represented by the `?` character;
+- _dollar sign numbered_ placeholders, represented by the
 `$1, $2, ..., $n` strings;
-
-- * _named parameters_, such as `:foo`, `:bar`, `:baz` etc.
+- _named parameters_, such as `:foo`, `:bar`, `:baz` etc.
 
 ## `keep_terminators`
 
-- * `$sql_splitter->keep_terminators`
-
-- * `$sql_splitter->keep_terminators( $boolean )`
+- `$sql_splitter->keep_terminators`
+- `$sql_splitter->keep_terminators( $boolean )`
 
 Getter/setter method for the `keep_terminators` option explained above.
 
@@ -319,33 +313,29 @@ An alias for the `keep_terminators` method explained above.
 
 ## `keep_extra_spaces`
 
-- * `$sql_splitter->keep_extra_spaces`
-
-- * `$sql_splitter->keep_extra_spaces( $boolean )`
+- `$sql_splitter->keep_extra_spaces`
+- `$sql_splitter->keep_extra_spaces( $boolean )`
 
 Getter/setter method for the `keep_extra_spaces` option explained above.
 
 ## `keep_comments`
 
-- * `$sql_splitter->keep_comments`
-
-- * `$sql_splitter->keep_comments( $boolean )`
+- `$sql_splitter->keep_comments`
+- `$sql_splitter->keep_comments( $boolean )`
 
 Getter/setter method for the `keep_comments` option explained above.
 
 ## `keep_empty_statements`
 
-- * `$sql_splitter->keep_empty_statements`
-
-- * `$sql_splitter->keep_empty_statements( $boolean )`
+- `$sql_splitter->keep_empty_statements`
+- `$sql_splitter->keep_empty_statements( $boolean )`
 
 Getter/setter method for the `keep_empty_statements` option explained above.
 
 ## `slash_terminates`
 
-- * `$sql_splitter->slash_terminates`
-
-- * `$sql_splitter->slash_terminates( $boolean )`
+- `$sql_splitter->slash_terminates`
+- `$sql_splitter->slash_terminates( $boolean )`
 
 Getter/setter method for the `slash_terminates` option explained above.
 
@@ -361,12 +351,12 @@ Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
 
 Procedural code is by far the most complex to handle.
 
-Currently any block of code which start with `DECLARE`, `CREATE` or `CALL` is
-correctly recognized, as well as _anonymous_ `BEGIN ... END` blocks,
-_dollar quoted_ blocks and blocks delimited by a `DELIMITER`-defined
-_custom terminator_, therefore a wide range of procedural extensions should be
-handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been tested
-so far.
+Currently any block of code which start with `FUNCTION`, `PROCEDURE`,
+`DECLARE`, `CREATE` or `CALL` is correctly recognized, as well as
+_anonymous_ `BEGIN ... END` blocks, _dollar quoted_ blocks and blocks
+delimited by a `DELIMITER`-defined _custom terminator_, therefore a wide range
+of procedural extensions should be handled correctly. However, only PL/SQL,
+PL/PgSQL and MySQL code has been tested so far.
 
 If you need also other procedural languages to be recognized, please let me know
 (possibly with some test cases).
@@ -384,38 +374,32 @@ To be split correctly, the given input must, in general, be syntactically valid
 SQL. For example, an unbalanced `BEGIN` or a misspelled keyword could, under
 certain circumstances, confuse the parser and make it trip over the next
 statement terminator, thus returning non-split statements.
-This should not be a problem though, as the original (invalid) SQL code would
-have been unusable anyway (remember that this is NOT a validating parser!)
+This should not be seen as a limitation though, as the original (invalid) SQL
+code would have been unusable anyway (remember that this is NOT a validating
+parser!)
 
 # SHOWCASE
 
 To test the capabilities of this module, you can run it
 (or rather run L<sql-split>) on the files `t/data/sakila-schema.sql` and
 `t/data/pagila-schema.sql` included in the distribution, which contain two
-quite large and complex _real world_ sample db schemata, for MySQL and
-PostgreSQL respectively.
+quite large and complex _real world_ db schemata, for MySQL and PostgreSQL
+respectively.
 
 For more information:
 
-- * Sakila db: [http://dev.mysql.com/doc/sakila/en/sakila.html](http://dev.mysql.com/doc/sakila/en/sakila.html)
-
-- * Pagila db: [http://pgfoundry.org/projects/dbsamples](http://pgfoundry.org/projects/dbsamples)
+- Sakila db: [http://dev.mysql.com/doc/sakila/en/sakila.html](http://dev.mysql.com/doc/sakila/en/sakila.html)
+- Pagila db: [http://pgfoundry.org/projects/dbsamples](http://pgfoundry.org/projects/dbsamples)
 
 # DEPENDENCIES
 
 SQL::SplitStatement depends on the following modules:
 
-- * [Carp](http://search.cpan.org/perldoc?Carp)
-
-- * [Class::Accessor::Fast](http://search.cpan.org/perldoc?Class::Accessor::Fast)
-
-- * [List::MoreUtils](http://search.cpan.org/perldoc?List::MoreUtils)
-
-- * [Regexp::Common](http://search.cpan.org/perldoc?Regexp::Common)
-
-- *
-
-[SQL::Tokenizer](http://search.cpan.org/perldoc?SQL::Tokenizer) 0.20 or newer
+- [Carp](http://search.cpan.org/perldoc?Carp)
+- [Class::Accessor::Fast](http://search.cpan.org/perldoc?Class::Accessor::Fast)
+- [List::MoreUtils](http://search.cpan.org/perldoc?List::MoreUtils)
+- [Regexp::Common](http://search.cpan.org/perldoc?Regexp::Common)
+- [SQL::Tokenizer](http://search.cpan.org/perldoc?SQL::Tokenizer) 0.20 or newer
 
 # AUTHOR
 
@@ -439,19 +423,19 @@ You can find documentation for this module with the perldoc command:
 
 You can also look for information at:
 
-- * RT: CPAN's request tracker
+- RT: CPAN's request tracker
 
 [http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-SplitStatement](http://rt.cpan.org/NoAuth/Bugs.html?Dist=SQL-SplitStatement)
 
-- * AnnoCPAN: Annotated CPAN documentation
+- AnnoCPAN: Annotated CPAN documentation
 
 [http://annocpan.org/dist/SQL-SplitStatement](http://annocpan.org/dist/SQL-SplitStatement)
 
-- * CPAN Ratings
+- CPAN Ratings
 
 [http://cpanratings.perl.org/d/SQL-SplitStatement](http://cpanratings.perl.org/d/SQL-SplitStatement)
 
-- * Search CPAN
+- Search CPAN
 
 [http://search.cpan.org/dist/SQL-SplitStatement/](http://search.cpan.org/dist/SQL-SplitStatement/)
 
@@ -462,13 +446,8 @@ this module a joke.
 
 # SEE ALSO
 
-- *
-
-[DBIx::MultiStatementDo](http://search.cpan.org/perldoc?DBIx::MultiStatementDo)
-
-- *
-
-L<sql-split>
+- [DBIx::MultiStatementDo](http://search.cpan.org/perldoc?DBIx::MultiStatementDo)
+- L<sql-split>
 
 # LICENSE AND COPYRIGHT
 

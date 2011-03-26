@@ -8,7 +8,7 @@ use warnings;
 use base 'Class::Accessor::Fast';
 
 use Carp qw(croak);
-use SQL::Tokenizer 0.20 qw(tokenize_sql);
+use SQL::Tokenizer 0.22 qw(tokenize_sql);
 use List::MoreUtils qw(firstval firstidx each_array);
 use Regexp::Common qw(delimited);
 
@@ -28,7 +28,7 @@ use constant {
     CUSTOM_DELIMITER     => 3
 };
 
-my $transaction_re = qr[^(?:
+my $transaction_RE = qr[^(?:
     ;
     |/
     |WORK
@@ -37,37 +37,40 @@ my $transaction_re = qr[^(?:
     |ISOLATION
     |READ
 )$]xi;
-my $procedural_END_re     = qr/^(?:IF|CASE|LOOP)$/i;
-my $terminator_re = qr[
+my $procedural_END_RE = qr/^(?:IF|CASE|LOOP)$/i;
+my $terminator_RE = qr[
     ;\s*\n\s*\.\s*\n\s*/\s*\n?
     |;\s*\n\s*/\s*\n?
     |\.\s*\n\s*/\s*\n?
     |\n\s*/\s*\n?
     |;
 ]x;
-my $begin_comment_re      = qr/^(?:--|\/\*)/;
-my $quoted_re             = $RE{delimited}{ -delim=>q{"'`} };
-my $CURSOR_re             = qr/^CURSOR$/i;
-my $DELIMITER_re          = qr/^DELIMITER$/i;
-my $DECLARE_re            = qr/^DECLARE$/i;
-my $PROCEDURE_FUNCTION_re = qr/^(?:FUNCTION|PROCEDURE)$/i;
-my $PACKAGE_re            = qr/^PACKAGE$/i;
-my $BEGIN_re              = qr/^BEGIN$/i;
-my $END_re                = qr/^END$/i;
-my $AS_re                 = qr/^AS$/i;
-my $IS_re                 = qr/^IS$/i;
-my $TYPE_re               = qr/^TYPE$/i;
-my $BODY_re               = qr/^BODY$/i;
-my $DROP_re               = qr/^DROP$/i;
-my $CRUD_re               = qr/^(?:DELETE|INSERT|SELECT|UPDATE)$/i;
+my $begin_comment_RE      = qr/^(?:--|\/\*)/;
+my $quoted_RE             = $RE{delimited}{ -delim=>q{"'`} };
+my $dollar_placeholder_RE = qr/^\$\d+$/;
+my $inner_identifier_RE   = qr/[_a-zA-Z][_a-zA-Z0-9]*/;
 
-my $GRANT_REVOKE_re            = qr/^(?:GRANT|REVOKE)$/i;;
-my $CREATE_ALTER_re            = qr/^(?:CREATE|ALTER)$/i;
-my $CREATE_REPLACE_re          = qr/^(?:CREATE|REPLACE)$/i;
-my $OR_REPLACE_re              = qr/^(?:OR|REPLACE)$/i;
-my $OR_REPLACE_PACKAGE_re = qr/^(?:OR|REPLACE|PACKAGE)$/i;
+my $CURSOR_RE             = qr/^CURSOR$/i;
+my $DELIMITER_RE          = qr/^DELIMITER$/i;
+my $DECLARE_RE            = qr/^DECLARE$/i;
+my $PROCEDURE_FUNCTION_RE = qr/^(?:FUNCTION|PROCEDURE)$/i;
+my $PACKAGE_RE            = qr/^PACKAGE$/i;
+my $BEGIN_RE              = qr/^BEGIN$/i;
+my $END_RE                = qr/^END$/i;
+my $AS_RE                 = qr/^AS$/i;
+my $IS_RE                 = qr/^IS$/i;
+my $TYPE_RE               = qr/^TYPE$/i;
+my $BODY_RE               = qr/^BODY$/i;
+my $DROP_RE               = qr/^DROP$/i;
+my $CRUD_RE               = qr/^(?:DELETE|INSERT|SELECT|UPDATE)$/i;
 
-my $pre_identifier_re = qr/^(?:
+my $GRANT_REVOKE_RE       = qr/^(?:GRANT|REVOKE)$/i;;
+my $CREATE_ALTER_RE       = qr/^(?:CREATE|ALTER)$/i;
+my $CREATE_REPLACE_RE     = qr/^(?:CREATE|REPLACE)$/i;
+my $OR_REPLACE_RE         = qr/^(?:OR|REPLACE)$/i;
+my $OR_REPLACE_PACKAGE_RE = qr/^(?:OR|REPLACE|PACKAGE)$/i;
+
+my $pre_identifier_RE = qr/^(?:
     BODY
     |CONSTRAINT
     |CURSOR
@@ -188,14 +191,14 @@ sub split_with_placeholders {
         }
         
         if ( 
-            $prev_token =~ $AS_re
+            $prev_token =~ $AS_RE
             and !$dollar_quote
             and $dollar_quote = $self->_dollar_quote_open_found($token)
         ) {
-            ( $dollar_quote_to_add = $dollar_quote ) =~ s[^\$+][];
+            ( $dollar_quote_to_add = $dollar_quote ) =~ s/^\Q$token//;
             $self->_add_to_current_statement($dollar_quote_to_add)
         }
-        elsif ( $token =~ $DELIMITER_re && !$prev_token ) {
+        elsif ( $token =~ $DELIMITER_RE && !$prev_token ) {
             my $tokens_to_shift = $self->_custom_delimiter_def_found;
             $self->_add_to_current_statement(
                 join '', splice @{ $self->_tokens }, 0, $tokens_to_shift
@@ -214,33 +217,33 @@ sub split_with_placeholders {
             $extra_end_found = 0 if $extra_end_found;
             $inside_block++
         }
-        elsif ( $token =~ $CREATE_ALTER_re ) {
+        elsif ( $token =~ $CREATE_ALTER_RE ) {
             my $next_token = $self->_peek_at_next_significant_token(
-                $OR_REPLACE_re
+                $OR_REPLACE_RE
             );
-            if ( $next_token =~ $PACKAGE_re ) {
+            if ( $next_token =~ $PACKAGE_RE ) {
                 $inside_package = 1;
                 $package_name = $self->_peek_at_package_name
             }
         }
         elsif (
-            $token =~ $PROCEDURE_FUNCTION_re
-            || $token =~ $BODY_re && $prev_token =~ $TYPE_re
+            $token =~ $PROCEDURE_FUNCTION_RE
+            || $token =~ $BODY_RE && $prev_token =~ $TYPE_RE
         ) {
             if (
                 !$inside_block && !$inside_brackets
-                && $prev_token !~ $DROP_re
-                && $prev_token !~ $pre_identifier_re
+                && $prev_token !~ $DROP_RE
+                && $prev_token !~ $pre_identifier_RE
             ) {
                 $inside_sub++;
                 $prev_keyword = $token;
                 push @sub_names, $self->_peek_at_next_significant_token
             }
         }
-        elsif ( $token =~ $IS_re || $token =~ $AS_re ) {
+        elsif ( $token =~ /$IS_RE|$AS_RE/ ) {
             if (
-                $prev_keyword =~ /$PROCEDURE_FUNCTION_re|$BODY_re/
-                && !$inside_block && $prev_token !~ $pre_identifier_re
+                $prev_keyword =~ /$PROCEDURE_FUNCTION_RE|$BODY_RE/
+                && !$inside_block && $prev_token !~ $pre_identifier_RE
             ) {
                 $inside_is_as++;
                 $prev_keyword = ''
@@ -249,19 +252,19 @@ sub split_with_placeholders {
             $inside_is_cursor = 1
                 if $inside_declare && $inside_cursor
         }
-        elsif ( $token =~ $DECLARE_re ) {
+        elsif ( $token =~ $DECLARE_RE ) {
             # In MySQL a declare can only appear inside a BEGIN ... END block.
             $inside_declare = 1
                 if !$inside_block
-                && $prev_token !~ $pre_identifier_re
+                && $prev_token !~ $pre_identifier_RE
         }
-        elsif ( $token =~ $CURSOR_re ) {
+        elsif ( $token =~ $CURSOR_RE ) {
             $inside_cursor = 1
                 if $inside_declare
-                && $prev_token !~ $DROP_re
-                && $prev_token !~ $pre_identifier_re
+                && $prev_token !~ $DROP_RE
+                && $prev_token !~ $pre_identifier_RE
         }
-        elsif ( $token =~ /$GRANT_REVOKE_re/ ) {
+        elsif ( $token =~ /$GRANT_REVOKE_RE/ ) {
             $inside_grant_revoke = 1 unless $prev_token
         }
         elsif (
@@ -298,7 +301,7 @@ sub split_with_placeholders {
                 }
             }
         }
-        elsif ( $token =~ $CRUD_re ) {
+        elsif ( $token =~ $CRUD_RE ) {
             $inside_crud = 1
         }
         elsif (
@@ -310,13 +313,14 @@ sub split_with_placeholders {
             )
         ) {
             $statement_placeholders++
-                if ! $self->_custom_delimiter
+                if !$self->_custom_delimiter
                     || $self->_custom_delimiter ne $placeholder_token;
             
+# Needed by SQL::Tokenizer pre-0.21
             # The only multi-token placeholder is a dollar placeholder.
-            if ( ( my $token_to_add = $placeholder_token ) =~ s[^\$][] ) {
-                $self->_add_to_current_statement($token_to_add)
-            }
+#            if ( ( my $token_to_add = $placeholder_token ) =~ s[^\$][] ) {
+#                $self->_add_to_current_statement($token_to_add)
+#            }
         }
         else {
             $terminator_found = $self->_is_terminator($token);
@@ -420,11 +424,11 @@ sub split_with_placeholders {
             @statements, @{ $self->_terminators }, @placeholders
         );
         while ( my ($statement, $terminator, $placeholder_num) = $sp->() ) {
-            my $only_terminator_re
+            my $only_terminator_RE
                 = $terminator->[0] && $terminator->[0] == CUSTOM_DELIMITER
                 ? qr/^\s*\Q$terminator->[1]\E?\s*$/
-                : qr/^\s*$terminator_re?\z/;
-            unless ( $statement =~ $only_terminator_re ) {
+                : qr/^\s*$terminator_RE?\z/;
+            unless ( $statement =~ $only_terminator_RE ) {
                 push @filtered_statements, $statement;
                 push @filtered_terminators, $terminator;
                 push @filtered_placeholders, $placeholder_num
@@ -439,7 +443,7 @@ sub split_with_placeholders {
                 if ( $terminator->[0] == CUSTOM_DELIMITER ) {
                     $filtered_statements[$i] =~ s/\Q$terminator->[1]\E$//
                 } else {
-                    $filtered_statements[$i] =~ s/$terminator_re$//
+                    $filtered_statements[$i] =~ s/$terminator_RE$//
                 }
             }
         }
@@ -459,15 +463,15 @@ sub _add_to_current_statement {
 
 sub _is_comment {
     my ($self, $token) = @_;
-    return $token =~ $begin_comment_re
+    return $token =~ $begin_comment_RE
 }
 
 sub _is_BEGIN_of_block {
     my ($self, $token, $prev_token) = @_;
     return 
-        $token =~ $BEGIN_re
-        && $prev_token !~ $pre_identifier_re
-        && $self->_peek_at_next_significant_token !~ $transaction_re
+        $token =~ $BEGIN_RE
+        && $prev_token !~ $pre_identifier_RE
+        && $self->_peek_at_next_significant_token !~ $transaction_RE
 }
 
 sub _is_END_of_block {
@@ -476,9 +480,9 @@ sub _is_END_of_block {
     
     # Return possible package name.
     if (
-        $token =~ $END_re && (
+        $token =~ $END_RE && (
             !defined($next_token)
-            || $next_token !~ $procedural_END_re
+            || $next_token !~ $procedural_END_RE
         )
     ) { return defined $next_token ? $next_token : '' }
     
@@ -488,14 +492,16 @@ sub _is_END_of_block {
 sub _dollar_placeholder_found {
     my ($self, $token) = @_;
     
-    return '' if $token ne SINGLE_DOLLAR;
-    
-    # $token must be: '$'
-    my $tokens = $self->_tokens;
-    
-    return $tokens->[0] =~ /^\d+$/ && $tokens->[1] !~ /^\$/
-        ? $token . shift( @$tokens )
-        : ''
+    return $token =~ $dollar_placeholder_RE ? $token : '';
+
+# Needed by SQL::Tokenizer pre-0.21
+#    return '' if $token ne SINGLE_DOLLAR;
+#    
+#    # $token must be: '$'
+#    my $tokens = $self->_tokens;
+#    
+#    return $tokens->[0] =~ /^\d+$/ && $tokens->[1] !~ /^\$/
+#        ? $token . shift( @$tokens ) : ''
 }
 
 sub _named_placeholder_found {
@@ -514,7 +520,14 @@ sub _dollar_quote_open_found {
     my ($self, $token) = @_;
     
     return '' if $token !~ /^\$/;
-    return $token if $token eq DOUBLE_DOLLAR;
+    
+    # Includes the DOUBLE_DOLLAR case
+    return $token if $token =~ /^\$$inner_identifier_RE?\$$/;
+#    Used with SQL::Tokenizer pre-0.21
+#    return $token if $token eq DOUBLE_DOLLAR;
+    
+    # $token must be: '$' or '$1', '$2' etc.
+    return '' if $token =~ $dollar_placeholder_RE;
     
     # $token must be: '$'
     my $tokens = $self->_tokens;
@@ -523,11 +536,12 @@ sub _dollar_quote_open_found {
     return '' if $tokens->[1] !~ /^\$/;
     
     return $token . shift( @$tokens ) . shift( @$tokens )
-        if $tokens->[1] eq SINGLE_DOLLAR;
+        if $tokens->[0] =~ /^$inner_identifier_RE$/
+        && $tokens->[1] eq SINGLE_DOLLAR;
     
-    # $tokens->[1] must be: '$$'
+    # $tokens->[1] must match: /$.+/
     my $quote = $token . shift( @$tokens ) . '$';
-    $tokens->[0] = '$';
+    $tokens->[0] = substr $tokens->[0], 1;
     return $quote
 }
 
@@ -535,7 +549,10 @@ sub _dollar_quote_close_found {
     my ($self, $token, $dollar_quote) = @_;
     
     return if $token !~ /^\$/;
-    return 1 if $token eq $dollar_quote; # $token eq '$$'
+    return 1 if $token eq $dollar_quote; # $token matches /$.*$/
+    
+    # $token must be: '$' or '$1', '$2' etc.
+    return if $token =~ $dollar_placeholder_RE;
     
     # $token must be: '$'
     my $tokens = $self->_tokens;
@@ -548,10 +565,10 @@ sub _dollar_quote_close_found {
         return 1
     }
     
-    # $tokens->[1] must be: '$$'
+    # $tokens->[1] must match: /$.+/
     if ( $dollar_quote eq $token . $tokens->[0] . '$' ) {
         shift( @$tokens );
-        $tokens->[0] = '$';
+        $tokens->[0] = substr $tokens->[0], 1;
         return 1
     }
     
@@ -560,7 +577,7 @@ sub _dollar_quote_close_found {
 
 sub _peek_at_package_name {
     shift->_peek_at_next_significant_token(
-        qr/$OR_REPLACE_PACKAGE_re|$BODY_re/
+        qr/$OR_REPLACE_PACKAGE_RE|$BODY_RE/
     )
 }
 
@@ -577,7 +594,7 @@ sub _custom_delimiter_def_found {
     my $tokens_in_delimiter;
     my $tokens_to_shift;
     
-    if ( $first_token_in_delimiter =~ $quoted_re ) {
+    if ( $first_token_in_delimiter =~ $quoted_RE ) {
         # Quoted custom delimiter: it's just a single token (to shift)...
         $tokens_to_shift = $base_index + 1;
         # ... However it can be composed by several tokens
@@ -698,12 +715,12 @@ sub _is_terminator {
 }
 
 sub _peek_at_next_significant_token {
-    my ($self, $skiptoken_re) = @_;
+    my ($self, $skiptoken_RE) = @_;
     
     my $tokens = $self->_tokens;
-    my $next_significant_token = $skiptoken_re
+    my $next_significant_token = $skiptoken_RE
         ? firstval {
-            /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_re/
+            /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_RE/
         } @{ $tokens }
         : firstval {
             /\S/ && ! $self->_is_comment($_)
@@ -714,12 +731,12 @@ sub _peek_at_next_significant_token {
 }
 
 sub _next_significant_token_idx {
-    my ($self, $skiptoken_re) = @_;
+    my ($self, $skiptoken_RE) = @_;
     
     my $tokens = $self->_tokens;
-    return $skiptoken_re
+    return $skiptoken_RE
         ? firstidx {
-            /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_re/
+            /\S/ && ! $self->_is_comment($_) && ! /$skiptoken_RE/
         } @{ $tokens }
         : firstidx {
             /\S/ && ! $self->_is_comment($_)
@@ -737,36 +754,36 @@ SQL::SplitStatement - Split any SQL code into atomic statements
 =head1 SYNOPSIS
 
     # Multiple SQL statements in a single string
-    my $sql_code = <<'SQL';
-    CREATE TABLE parent(a, b, c   , d    );
-    CREATE TABLE child (x, y, "w;", "z;z");
-    /* C-style comment; */
-    CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-        EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-    BEGIN
-        SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
-    END;
-    -- Standalone SQL; comment; with semicolons;
-    INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
-    SQL
+my $sql_code = <<'SQL';
+CREATE TABLE parent(a, b, c   , d    );
+CREATE TABLE child (x, y, "w;", "z;z");
+/* C-style comment; */
+CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+    EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+BEGIN
+    SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
+END;
+-- Standalone SQL; comment; with semicolons;
+INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
+SQL
     
-    use SQL::SplitStatement;
+use SQL::SplitStatement;
     
-    my $sql_splitter = SQL::SplitStatement->new;
-    my @statements = $sql_splitter->split($sql_code);
+my $sql_splitter = SQL::SplitStatement->new;
+my @statements = $sql_splitter->split($sql_code);
     
-    # @statements now is:
-    #
-    # (
-    #     'CREATE TABLE parent(a, b, c   , d    )',
-    #     'CREATE TABLE child (x, y, "w;", "z;z")',
-    #     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-    #     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-    # BEGIN
-    #     SELECT RAISE(ABORT, \'constraint failed;\');
-    # END',
-    #     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
-    # )
+# @statements now is:
+#
+# (
+#     'CREATE TABLE parent(a, b, c   , d    )',
+#     'CREATE TABLE child (x, y, "w;", "z;z")',
+#     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+#     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+# BEGIN
+#     SELECT RAISE(ABORT, \'constraint failed;\');
+# END',
+#     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
+# )
 
 =head1 DESCRIPTION
 
@@ -958,8 +975,8 @@ If set to false, a forward-slash on its own line is treated as a statement
 terminator only if preceded by a semicolon or by a dot and a semicolon.
 
 If you are dealing with Oracle's SQL, you should let this option set, since a
-slash (alone, without a preceding semicolon) is often used as a terminator, as
-it is permitted by SQL*Plus (on non-I<block> statements).
+slash (alone, without a preceding semicolon) is sometimes used as a terminator,
+as it is permitted by SQL*Plus (on non-I<block> statements).
 
 With SQL dialects other than Oracle, there is the (theoretical) possibility that
 a slash on its own line can pass the additional checks and be considered a
@@ -995,7 +1012,7 @@ true value):
     
     my @statements = $sql_splitter->split( 'SELECT 1;' );
     
-    print 'The SQL code contains ' . Scalar(@statements) . ' statements.';
+    print 'The SQL code contains ' . scalar(@statements) . ' statements.';
     # The SQL code contains 2 statements.
 
 =head2 C<split_with_placeholders>
@@ -1007,8 +1024,8 @@ true value):
 =back
 
 It works exactly as the C<split> method explained above, except that it returns
-also a list of integers, each of which is the number of the
-I<unnamed placeholders> contained in the corresponding atomic statement.
+also a list of integers, each of which is the number of the I<placeholders>
+contained in the corresponding atomic statement.
 
 More precisely, its return value is a list of two elements, the first of which
 is a reference to the list of the atomic statements exactly as returned by the
@@ -1018,19 +1035,19 @@ placeholders as explained above.
 Here is an example:
 
     # 4 statements (valid SQLite SQL)
-    my $sql_code = <<'SQL';
-    CREATE TABLE state (id, name);
-    INSERT INTO  state (id, name) VALUES (?, ?);
-    CREATE TABLE city  (id, name, state_id);
-    INSERT INTO  city  (id, name, state_id) VALUES (?, ?, ?)
-    SQL
+my $sql_code = <<'SQL';
+CREATE TABLE state (id, name);
+INSERT INTO  state (id, name) VALUES (?, ?);
+CREATE TABLE city  (id, name, state_id);
+INSERT INTO  city  (id, name, state_id) VALUES (?, ?, ?)
+SQL
     
-    my $splitter = SQL::SplitStatement->new;
+my $splitter = SQL::SplitStatement->new;
     
-    my ( $statements, $placeholders )
-        = $splitter->split_with_placeholders( $sql_code );
+my ( $statements, $placeholders )
+    = $splitter->split_with_placeholders( $sql_code );
     
-    # $placeholders now is: [0, 2, 0, 3]
+# $placeholders now is: [0, 2, 0, 3]
 
 where the returned C<$placeholders> list(ref) is to be read as follows: the
 first statement contains 0 placeholders, the second 2, the third 0 and the
@@ -1125,12 +1142,12 @@ Currently it has been tested mainly on SQLite, PostgreSQL, MySQL and Oracle.
 
 Procedural code is by far the most complex to handle.
 
-Currently any block of code which start with C<DECLARE>, C<CREATE> or C<CALL> is
-correctly recognized, as well as I<anonymous> C<BEGIN ... END> blocks,
-I<dollar quoted> blocks and blocks delimited by a C<DELIMITER>-defined
-I<custom terminator>, therefore a wide range of procedural extensions should be
-handled correctly. However, only PL/SQL, PL/PgSQL and MySQL code has been tested
-so far.
+Currently any block of code which start with C<FUNCTION>, C<PROCEDURE>,
+C<DECLARE>, C<CREATE> or C<CALL> is correctly recognized, as well as
+I<anonymous> C<BEGIN ... END> blocks, I<dollar quoted> blocks and blocks
+delimited by a C<DELIMITER>-defined I<custom terminator>, therefore a wide range
+of procedural extensions should be handled correctly. However, only PL/SQL,
+PL/PgSQL and MySQL code has been tested so far.
 
 If you need also other procedural languages to be recognized, please let me know
 (possibly with some test cases).
@@ -1148,16 +1165,17 @@ To be split correctly, the given input must, in general, be syntactically valid
 SQL. For example, an unbalanced C<BEGIN> or a misspelled keyword could, under
 certain circumstances, confuse the parser and make it trip over the next
 statement terminator, thus returning non-split statements.
-This should not be a problem though, as the original (invalid) SQL code would
-have been unusable anyway (remember that this is NOT a validating parser!)
+This should not be seen as a limitation though, as the original (invalid) SQL
+code would have been unusable anyway (remember that this is NOT a validating
+parser!)
 
 =head1 SHOWCASE
 
 To test the capabilities of this module, you can run it
-(or rather run L<sql-split>) on the files C<t/data/sakila-schema.sql> and
-C<t/data/pagila-schema.sql> included in the distribution, which contain two
-quite large and complex I<real world> sample db schemata, for MySQL and
-PostgreSQL respectively.
+(or rather run L<sql-split>) on the files F<t/data/sakila-schema.sql> and
+F<t/data/pagila-schema.sql> included in the distribution, which contain two
+quite large and complex I<real world> db schemata, for MySQL and PostgreSQL
+respectively.
 
 For more information:
 
@@ -1183,9 +1201,7 @@ SQL::SplitStatement depends on the following modules:
 
 =item * L<Regexp::Common>
 
-=item *
-
-L<SQL::Tokenizer> 0.20 or newer
+=item * L<SQL::Tokenizer> 0.22 or newer
 
 =back
 
@@ -1240,13 +1256,9 @@ this module a joke.
 
 =over 4
 
-=item *
+=item * L<DBIx::MultiStatementDo>
 
-L<DBIx::MultiStatementDo>
-
-=item *
-
-L<sql-split>
+=item * L<sql-split>
 
 =back
 
