@@ -754,36 +754,36 @@ SQL::SplitStatement - Split any SQL code into atomic statements
 =head1 SYNOPSIS
 
     # Multiple SQL statements in a single string
-my $sql_code = <<'SQL';
-CREATE TABLE parent(a, b, c   , d    );
-CREATE TABLE child (x, y, "w;", "z;z");
-/* C-style comment; */
-CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-    EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-BEGIN
-    SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
-END;
--- Standalone SQL; comment; with semicolons;
-INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
-SQL
-    
-use SQL::SplitStatement;
-    
-my $sql_splitter = SQL::SplitStatement->new;
-my @statements = $sql_splitter->split($sql_code);
-    
-# @statements now is:
-#
-# (
-#     'CREATE TABLE parent(a, b, c   , d    )',
-#     'CREATE TABLE child (x, y, "w;", "z;z")',
-#     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
-#     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
-# BEGIN
-#     SELECT RAISE(ABORT, \'constraint failed;\');
-# END',
-#     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
-# )
+    my $sql_code = <<'SQL';
+    CREATE TABLE parent(a, b, c   , d    );
+    CREATE TABLE child (x, y, "w;", "z;z");
+    /* C-style comment; */
+    CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+        EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+    BEGIN
+        SELECT RAISE(ABORT, 'constraint failed;'); -- Inline SQL comment
+    END;
+    -- Standalone SQL; comment; with semicolons;
+    INSERT INTO parent (a, b, c, d) VALUES ('pippo;', 'pluto;', NULL, NULL);
+    SQL
+
+    use SQL::SplitStatement;
+
+    my $sql_splitter = SQL::SplitStatement->new;
+    my @statements = $sql_splitter->split($sql_code);
+
+    # @statements now is:
+    #
+    # (
+    #     'CREATE TABLE parent(a, b, c   , d    )',
+    #     'CREATE TABLE child (x, y, "w;", "z;z")',
+    #     'CREATE TRIGGER "check;delete;parent;" BEFORE DELETE ON parent WHEN
+    #     EXISTS (SELECT 1 FROM child WHERE old.a = x AND old.b = y)
+    # BEGIN
+    #     SELECT RAISE(ABORT, \'constraint failed;\');
+    # END',
+    #     'INSERT INTO parent (a, b, c, d) VALUES (\'pippo;\', \'pluto;\', NULL, NULL)'
+    # )
 
 =head1 DESCRIPTION
 
